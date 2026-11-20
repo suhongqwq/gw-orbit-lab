@@ -2110,6 +2110,160 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   else host.OrbitEccentricity = api;
 })(typeof window === &#x27;object&#x27; ? window : globalThis);
 
+/* Weak-field comparison of identical binary initial states, in the binary integrator&#x27;s units.
+ * Peters (Phys. Rev. 136, B1224, 1964), Eqs. (5.6)–(5.7), gives the orbit-averaged reference.
+ */
+(function (host) {
+  &#x27;use strict&#x27;;
+  const isNode = typeof module === &#x27;object&#x27; &amp;&amp; module.exports;
+  const PN = isNode ? require(&#x27;./pn-dynamics.js&#x27;) : host.BinaryPN;
+  const radial = isNode ? require(&#x27;./orbit-eccentricity.js&#x27;) : host.OrbitEccentricity;
+  const TAU = 2 * Math.PI;
+  const limits = Object.freeze({minimumRadius: 20, maximumSpeed: 0.3, maximumChangePerOrbit: 0.05,
+    nominalPeriods: 32, maximumSteps: 120000});
+  const source = &#x27;https://doi.org/10.1103/PhysRev.136.B1224&#x27;;
+
+  function keplerElements([x, y, vx, vy]) {
+    const r = Math.hypot(x, y), v2 = vx * vx + vy * vy, rv = x * vx + y * vy;
+    const energy = v2 / 2 - 1 / r;
+    const e = Math.hypot((v2 - 1 / r) * x - rv * vx, (v2 - 1 / r) * y - rv * vy);
+    return {a: energy &lt; 0 ? -0.5 / energy : Infinity, e};
+  }
+
+  function petersRates(a, e, {eta, compactness}) {
+    const strength = eta * compactness ** 2.5;
+    const e2 = e * e, oneMinusE2 = (1 - e) * (1 + e);
+    // Time is measured in sqrt(r0^3/GM) and a in r0, so G^3 μ M^2/c^5 reduces to this strength.
+    return {
+      da: -64 / 5 * strength * (1 + 73 / 24 * e2 + 37 / 96 * e2 * e2) / (a ** 3 * oneMinusE2 ** 3.5),
+      de: -304 / 15 * strength * e * (1 + 121 / 304 * e2) / (a ** 4 * oneMinusE2 ** 2.5)
+    };
+  }
+
+  function petersCheck({a, e}, model) {
+    if (!Number.isFinite(a) || a &lt;= 0 || !(e &gt;= 0 &amp;&amp; e &lt; 1)) return &#x27;unbound&#x27;;
+    const peri = a * (1 - e);
+    if (peri &lt; limits.minimumRadius * model.compactness ||
+        model.compactness * (1 + e) / peri &gt; limits.maximumSpeed ** 2) return &#x27;strong-field&#x27;;
+    const {da} = petersRates(a, e, model);
+    if (-da / a * TAU * a ** 1.5 &gt; limits.maximumChangePerOrbit) return &#x27;nonadiabatic&#x27;;
+    return null;
+  }
+
+  function petersStep({time, a, e}, dt, model) {
+    const k1 = petersRates(a, e, model);
+    const k2 = petersRates(a + dt * k1.da / 2, e + dt * k1.de / 2, model);
+    const k3 = petersRates(a + dt * k2.da / 2, e + dt * k2.de / 2, model);
+    const k4 = petersRates(a + dt * k3.da, e + dt * k3.de, model);
+    return {time: time + dt,
+      a: a + dt * (k1.da + 2 * k2.da + 2 * k3.da + k4.da) / 6,
+      e: e + dt * (k1.de + 2 * k2.de + 2 * k3.de + k4.de) / 6};
+  }
+
+  function weakField(state, {compactness}) {
+    return Math.hypot(state[0], state[1]) &gt;= limits.minimumRadius * compactness &amp;&amp;
+      Math.hypot(state[2], state[3]) * Math.sqrt(compactness) &lt;= limits.maximumSpeed;
+  }
+
+  function create({state, model, step, stepSize}) {
+    const offModel = {...model, rr: 0};
+    const onModel = {...model, rr: 8 / 5 * model.eta * model.compactness ** 2.5};
+    const branches = [offModel, onModel].map(dynamics =&gt; ({state: [...state], dynamics, tracker: radial.track(), time: 0}));
+    const [off, on] = branches;
+    const initial = keplerElements(state);
+    const peters = [];
+    let reason = null, petersReason = petersCheck(initial, model), steps = 0, done = false;
+    let period = 0, duration = 0, target = 0;
+
+    if (!state.every(Number.isFinite) || !Number.isFinite(onModel.rr)) reason = &#x27;nonfinite&#x27;;
+    else if (!weakField(state, model)) reason = &#x27;strong-field&#x27;;
+    else {
+      const {energy} = PN.invariants(state, offModel);
+      if (!(energy &lt; 0)) reason = &#x27;unbound&#x27;;
+      else if (PN.circularDeviation(state, offModel) &lt; 1e-4) reason = &#x27;near-circular&#x27;;
+      else if (!model.pn &amp;&amp; petersReason === &#x27;strong-field&#x27;) reason = &#x27;strong-field&#x27;;
+      else {
+        // A Newtonian period sets the comparison horizon. If the PN bound orbit
+        // has no bound Newtonian counterpart, estimate its period from PN binding energy.
+        const a = Number.isFinite(initial.a) ? initial.a : -0.5 / energy;
+        period = TAU * a ** 1.5;
+        duration = target = limits.nominalPeriods * period;
+        if (!(Number.isFinite(duration) &amp;&amp; duration &gt; 0)) reason = &#x27;nonfinite&#x27;;
+      }
+    }
+    done = Boolean(reason);
+    if (!done) {
+      for (const branch of branches) branch.tracker.sample(0, branch.state);
+      if (!petersReason) peters.push({time: 0, ...initial});
+    }
+
+    const endTime = () =&gt; Math.min(target, off.time, on.time);
+
+    function stop(why, at) {
+      if (at &lt;= target) {
+        target = at;
+        reason = why;
+      }
+    }
+
+    function updatePeters(until, includeEnd) {
+      if (petersReason || !peters.length) return;
+      const cadence = period / 12;
+      let last = peters[peters.length - 1];
+      while (last.time + cadence &lt;= until || (includeEnd &amp;&amp; until - last.time &gt; 1e-10)) {
+        const next = petersStep(last, Math.min(cadence, until - last.time), onModel);
+        petersReason = petersCheck(next, onModel);
+        if (petersReason) return;
+        peters.push(next);
+        last = next;
+      }
+    }
+
+    function advance(budget = 1000) {
+      const remainingSteps = Math.min(limits.maximumSteps, steps + Math.max(0, Math.floor(budget)));
+      while (!done &amp;&amp; steps &lt; remainingSteps) {
+        // Advance the lagging branch first to keep both runs on one shared time interval.
+        const branch = off.time &lt;= on.time ? off : on;
+        if (branch.time &gt;= target) break;
+        const dt = Math.min(target - branch.time, stepSize(branch.state, branch.dynamics));
+        if (!Number.isFinite(dt) || !(branch.time + dt &gt; branch.time)) {
+          stop(&#x27;nonfinite&#x27;, branch.time);
+          break;
+        }
+        const next = step(branch.state, dt, branch.dynamics);
+        const finite = next.every(Number.isFinite);
+        steps++;
+        if (!finite || !weakField(next, branch.dynamics)) {
+          stop(finite ? &#x27;strong-field&#x27; : &#x27;nonfinite&#x27;, branch.time);
+          break;
+        }
+        branch.state = next;
+        branch.time += dt;
+        branch.tracker.sample(branch.time, next);
+      }
+      if (!done &amp;&amp; steps &gt;= limits.maximumSteps) stop(&#x27;step-limit&#x27;, endTime());
+      if (!done &amp;&amp; endTime() &gt;= target) {
+        for (const branch of branches) {
+          const points = branch.tracker.points;
+          while (points.length &amp;&amp; points[points.length - 1].time &gt; target) points.pop();
+        }
+        reason ||= &#x27;duration&#x27;;
+        done = true;
+      }
+      updatePeters(endTime(), done);
+    }
+
+    return {off: off.tracker.points, on: on.tracker.points, peters, initial, duration, advance,
+      get done() { return done; }, get reason() { return reason; }, get petersReason() { return petersReason; },
+      get endTime() { return endTime(); }, get steps() { return steps; },
+      get progress() { return done &amp;&amp; duration &gt; 0 ? 1 : duration &gt; 0 ? endTime() / duration : 0; }};
+  }
+
+  const api = {create, limits, petersRates, source};
+  if (isNode) module.exports = api;
+  else host.BinaryOrbitComparison = api;
+})(typeof window === &#x27;object&#x27; ? window : globalThis);
+
 /* Timelike bound Schwarzschild geodesics. G=M=c=1, coordinate time t.
  * Darwin anomaly avoids square-root sign switching at radial turning points.
  * r=p/(1+e cos chi); E,L and separatrix: arXiv:1307.3476, Sec. II A.
@@ -2167,6 +2321,27 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   &#x27;use strict&#x27;;
   const TAU=2*Math.PI,clamp=(x,a,b)=&gt;Math.max(a,Math.min(b,x));
   const t=(zh,en)=&gt;host.OrbitLocale?.t(zh,en)??zh;
+  // In-place, unnormalized radix-2 FFT of a complex array of power-of-two length.
+  function fft(re,im){
+    const n=re.length;
+    for(let i=1,j=0;i&lt;n;i++){
+      let bit=n&gt;&gt;1;
+      for(;j&amp;bit;bit&gt;&gt;=1)j^=bit;
+      j^=bit;
+      if(i&lt;j){const a=re[i];re[i]=re[j];re[j]=a;const b=im[i];im[i]=im[j];im[j]=b;}
+    }
+    for(let len=2;len&lt;=n;len*=2){
+      const angle=-TAU/len,wr=Math.cos(angle),wi=Math.sin(angle);
+      for(let start=0;start&lt;n;start+=len){
+        let cr=1,ci=0;
+        for(let j=0;j&lt;len/2;j++){
+          const a=start+j,b=a+len/2,tr=cr*re[b]-ci*im[b],ti=cr*im[b]+ci*re[b];
+          re[b]=re[a]-tr;im[b]=im[a]-ti;re[a]+=tr;im[a]+=ti;
+          const nr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=nr;
+        }
+      }
+    }
+  }
   function analyze(values,dt,options={}){
     const size=values.length,n=size*4,re=new Float64Array(n),im=new Float64Array(n);
     let mean=values.reduce((a,b)=&gt;a+b,0)/size,sum=0,sum2=0;
@@ -2174,8 +2349,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     // noninteger-cycle chirp otherwise introduces a phase-dependent low-frequency pedestal.
     if(options.weightedMean){let weighted=0,weight=0;for(let i=0;i&lt;size;i++){const w=0.5*(1-Math.cos(TAU*i/(size-1)));weighted+=values[i]*w;weight+=w;}mean=weighted/weight;}
     for(let i=0;i&lt;size;i++){const w=0.5*(1-Math.cos(TAU*i/(size-1)));re[i]=(values[i]-mean)*w;sum+=w;sum2+=w*w;}
-    for(let i=1,j=0;i&lt;n;i++){let bit=n&gt;&gt;1;for(;j&amp;bit;bit&gt;&gt;=1)j^=bit;j^=bit;if(i&lt;j){const a=re[i];re[i]=re[j];re[j]=a;}}
-    for(let len=2;len&lt;=n;len*=2){const angle=-TAU/len,wr=Math.cos(angle),wi=Math.sin(angle);for(let start=0;start&lt;n;start+=len){let cr=1,ci=0;for(let j=0;j&lt;len/2;j++){const a=start+j,b=a+len/2,tr=cr*re[b]-ci*im[b],ti=cr*im[b]+ci*re[b];re[b]=re[a]-tr;im[b]=im[a]-ti;re[a]+=tr;im[a]+=ti;const nr=cr*wr-ci*wi;ci=cr*wi+ci*wr;cr=nr;}}}
+    fft(re,im);
     const power=Float32Array.from({length:n/2+1},(_,k)=&gt;(k===0||k===n/2?1:4)*(re[k]**2+im[k]**2)/(sum*sum));
     let bin=1,peak=0;for(let k=1;k&lt;power.length;k++)if(power[k]&gt;peak){bin=k;peak=power[k];}
     const logs=k=&gt;Math.log(Math.max(power[k],1e-30));let offset=0;
@@ -2464,6 +2638,10 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     // Rasterize by actual time coordinates; column spacing need not be uniform.
     ctx.drawImage(pixelCanvas,box.x,box.y,box.width,box.height);
     ctx.restore();
+    return (px,py)=&gt;{
+      const col=Math.floor((px-box.x)/box.width*cols),row=Math.floor((py-box.y)/box.height*rows);
+      return col&gt;=0&amp;&amp;col&lt;cols&amp;&amp;row&gt;=0&amp;&amp;row&lt;rows&amp;&amp;data.data[4*(row*cols+col)+3]!==0;
+    };
   }
   function legend(plot,range){
     const {ctx,box,colors}=plot,bx=box.x+box.width+10,by=box.y+2,bh=box.height-4,barWidth=10;
@@ -2630,7 +2808,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   }
   function renderSpectrum({canvas,methodLabel,note,prefs,showTrack,cache,state,bounds,colors,tunit,
       frequencyUnit=&#x27;Hz&#x27;,timeUnit=&#x27;s&#x27;,frequencyFloor,frequencyCeiling,focusReference,timeOrigin=null,before=false,
-      previousLimit=null,ease=1,guides=[],emptyLabel}){
+      previousLimit=null,ease=1,guides=[],emptyLabel,cursorTime=null}){
     const plot=spectrumFrame(canvas,bounds,colors),{ctx,box,start,end}=plot;
     const columns=state.columns.filter(c=&gt;c.t+c.halfWidth&gt;=start&amp;&amp;c.t-c.halfWidth&lt;=end&amp;&amp;
       (!before||c.segment===&#x27;orbit&#x27;&amp;&amp;c.t+c.duration*(1-1/c.size)/(2*tunit)&lt;=end+1e-9));
@@ -2647,10 +2825,18 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       maxPower=Math.max(1e-20,peakColumn?.peak||0);
     }
     spectrumBackground(plot);
-    draw(plot,displayed,fmax,maxPower,{fmin,range:prefs.range,smooth:prefs.smooth});
+    const canPick=draw(plot,displayed,fmax,maxPower,{fmin,range:prefs.range,smooth:prefs.smooth})||(()=&gt;false);
     spectrumAxes(plot,fmin,fmax,y,{frequencyUnit,timeUnit,tunit,timeOrigin});
     legend(plot,prefs.range);
     const trackPoints=showTrack?drawGuides(plot,state.samples,guides,tunit,y,fmax):0;
+    if(Number.isFinite(cursorTime)&amp;&amp;cursorTime&gt;=start&amp;&amp;cursorTime&lt;=end){
+      const px=plot.x(cursorTime);
+      ctx.save();
+      ctx.beginPath();ctx.rect(box.x,box.y,box.width,box.height);ctx.clip();
+      ctx.beginPath();ctx.moveTo(px,box.y);ctx.lineTo(px,box.y+box.height);
+      ctx.setLineDash([4,3]);ctx.strokeStyle=&#x27;rgba(255,255,255,.88)&#x27;;ctx.lineWidth=1;ctx.stroke();
+      ctx.restore();
+    }
     if(!displayed.length){
       ctx.fillStyle=&#x27;#ece7f4&#x27;;ctx.textAlign=&#x27;center&#x27;;
       const waiting=before?t(&#x27;并合前记录不足一个分析窗&#x27;,&#x27;Not enough pre-merger data&#x27;):t(&#x27;正在积累分析窗口…&#x27;,&#x27;Collecting samples…&#x27;);
@@ -2671,13 +2857,292 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       start:start*tunit,end:end*tunit,refTime:timeOrigin===null?&#x27;&#x27;:timeOrigin*tunit,trackPoints,frequencyUnit,timeUnit
     });
     return {
-      limits,status:useCqt?&#x27;Hann · &#x27;+t(&#x27;窗长&#x27;,&#x27;Window&#x27;)+&#x27; T = &#x27;+cqtCycles+&#x27;/f · &#x27;+t(&#x27;每倍频程 &#x27;+cqtBands+&#x27; 个频点&#x27;,cqtBands+&#x27; bins per octave&#x27;):
+      limits,plotBox:box,bounds:{start,end},canPick,
+      status:useCqt?&#x27;Hann · &#x27;+t(&#x27;窗长&#x27;,&#x27;Window&#x27;)+&#x27; T = &#x27;+cqtCycles+&#x27;/f · &#x27;+t(&#x27;每倍频程 &#x27;+cqtBands+&#x27; 个频点&#x27;,cqtBands+&#x27; bins per octave&#x27;):
         description(columns.at(-1),frequencyScale,frequencyUnit)
     };
   }
-  const api={analyze,historyColumn,retainColumns,constantQ,cqtCycles,cqtBands,attach,frequencyBounds,
+  const api={fft,analyze,historyColumn,retainColumns,constantQ,cqtCycles,cqtBands,attach,frequencyBounds,
     appendAdaptiveStft,resetUniformStft,appendUniformStft,rebuildUniformStft,trimHistory};
   if(typeof module===&#x27;object&#x27;&amp;&amp;module.exports)module.exports=api;else host.ToySpectrum=api;
+})(typeof window===&#x27;object&#x27;?window:globalThis);
+
+/* Finite-window Fourier amplitude of the recorded, normalized strain h/h₀. */
+(function(host){
+  &#x27;use strict&#x27;;
+  const SP=typeof module===&#x27;object&#x27;&amp;&amp;module.exports?require(&#x27;./spectrum.js&#x27;):host.ToySpectrum;
+  const TAU=2*Math.PI;
+  const t=(zh,en)=&gt;host.OrbitLocale?.t(zh,en)??zh;
+
+  // The interval transform is exact for linear interpolation. Its even and
+  // odd parts are sinc(z) and i sinc&#x27;(z), with z = π f Δt.
+  function kernel(z){
+    if(Math.abs(z)&lt;1e-3){const z2=z*z;return [1-z2/6+z2*z2/120,z*(-1/3+z2/30-z2*z2/840)];}
+    const sin=Math.sin(z);
+    return [sin/z,(z*Math.cos(z)-sin)/(z*z)];
+  }
+  function medianStep(history){
+    const steps=[];
+    for(let i=1;i&lt;history.length;i++){
+      const dt=history[i].t-history[i-1].t;
+      if(Number.isFinite(dt)&amp;&amp;dt&gt;0)steps.push(dt);
+    }
+    steps.sort((a,b)=&gt;a-b);
+    return steps[steps.length&gt;&gt;1]||0;
+  }
+  function prepare(samples,{start,end,tunit,component,taper}){
+    if(samples.length&lt;8||!(end&gt;start)||!(tunit&gt;0))return null;
+    const hasCadence=s=&gt;Number.isFinite(s.dt)&amp;&amp;s.dt&gt;0;
+    const fallback=samples.some(s=&gt;!hasCadence(s))?medianStep(samples):0;
+    const runs=[];
+    let first=Infinity,last=-Infinity,duration=0,minDt=Infinity,maxDt=0,spans=0;
+    let minValue=Infinity,maxValue=-Infinity;
+    let prevRight=-Infinity,intervals=0;
+    // Use interpolated boundary values only inside observed intervals.
+    for(let i=1;i&lt;samples.length;i++){
+      const a=samples[i-1],b=samples[i],rawStep=b.t-a.t;
+      if(b.t&lt;=start)continue;
+      if(a.t&gt;=end)break;
+      const nominal=Math.max(hasCadence(a)?a.dt:fallback,hasCadence(b)?b.dt:fallback);
+      if(!(rawStep&gt;0)||nominal&gt;0&amp;&amp;rawStep&gt;1.02*nominal||
+         !Number.isFinite(a[component])||!Number.isFinite(b[component]))continue;
+      const left=Math.max(start,a.t),right=Math.min(end,b.t);
+      if(!(right&gt;left))continue;
+      const d=(right-left)*tunit,dy=b[component]-a[component];
+      first=Math.min(first,left);last=right;duration+=d;
+      minDt=Math.min(minDt,rawStep*tunit);maxDt=Math.max(maxDt,rawStep*tunit);
+      if(left!==prevRight)spans++;
+      let run=runs.at(-1);
+      if(!run||left!==prevRight||Math.abs(run.step-d)&gt;run.step*1e-7){
+        run={left,step:d,knots:[]};
+        runs.push(run);
+      }
+      const leftValue=a[component]+dy*(left-a.t)/rawStep,rightValue=a[component]+dy*(right-a.t)/rawStep;
+      minValue=Math.min(minValue,leftValue,rightValue);
+      maxValue=Math.max(maxValue,leftValue,rightValue);
+      run.knots.push([leftValue,rightValue]);
+      prevRight=right;intervals++;
+    }
+    if(intervals&lt;7||!(last&gt;first))return null;
+    const span=(last-first)*tunit;
+    const edge=0.05*span;
+    const weight=lag=&gt;{
+      if(!taper||lag&gt;=edge&amp;&amp;lag&lt;=span-edge)return 1;
+      return 0.5-0.5*Math.cos(Math.PI*Math.max(0,Math.min(lag,span-lag)/edge));
+    };
+    for(const run of runs){
+      run.start=(run.left-first)*tunit;
+      run.mean=new Float64Array(run.knots.length);
+      run.slope=new Float64Array(run.knots.length);
+      for(let i=0;i&lt;run.knots.length;i++){
+        const lag=run.start+i*run.step;
+        const a=run.knots[i][0]*weight(lag),b=run.knots[i][1]*weight(lag+run.step);
+        run.mean[i]=(a+b)/2;
+        run.slope[i]=(b-a)/2;
+      }
+      delete run.knots;
+    }
+    const varying=maxValue-minValue&gt;1e-12*Math.max(Math.abs(minValue),Math.abs(maxValue));
+    return {runs,first,last,span,duration,minDt,maxDt,spans,varying};
+  }
+  function uniformFourier(run,floor,ceiling){
+    const {step,mean,slope}=run;
+    const n=2**Math.ceil(Math.log2(mean.length*4));
+    const re=new Float64Array(n),im=new Float64Array(n);
+    re.set(mean);im.set(slope);
+    SP.fft(re,im);
+    const frequencies=[],amplitudes=[];
+    for(let k=Math.max(1,Math.ceil(floor*n*step));k&lt;=Math.min(n/2,Math.floor(ceiling*n*step));k++){
+      // Unpack the FFTs of the two real arrays from the single complex FFT.
+      const mirror=n-k,evenRe=(re[k]+re[mirror])/2,evenIm=(im[k]-im[mirror])/2;
+      const oddRe=(im[k]+im[mirror])/2,oddIm=(re[mirror]-re[k])/2;
+      const f=k/(n*step),[sinc,prime]=kernel(Math.PI*f*step);
+      frequencies.push(f);
+      amplitudes.push(step*Math.hypot(sinc*evenRe-prime*oddIm,sinc*evenIm+prime*oddRe));
+    }
+    return {frequencies,amplitudes};
+  }
+  function integrateAt(runs,f){
+    let real=0,imag=0;
+    for(const {start,step,mean,slope} of runs){
+      const increment=TAU*f*step,phase=TAU*f*start+increment/2;
+      const dx=Math.cos(increment),dy=Math.sin(increment);
+      const [sinc,prime]=kernel(increment/2);
+      let x=Math.cos(phase),y=Math.sin(phase);
+      for(let i=0;i&lt;mean.length;i++){
+        const a=step*sinc*mean[i],b=step*prime*slope[i];
+        real+=a*x+b*y;
+        imag+=b*x-a*y;
+        const nextX=x*dx-y*dy;
+        y=x*dy+y*dx;x=nextX;
+      }
+    }
+    return Math.hypot(real,imag);
+  }
+  function integrate(samples,options){
+    const segment=prepare(samples,{component:&#x27;plus&#x27;,...options});
+    if(!segment)return null;
+    const {span,minDt,maxDt,runs}=segment;
+    // A single trace represents the same set of recorded intervals at every
+    // frequency. Limit its bandwidth to the coarsest participating cadence.
+    const floor=1/span,ceiling=0.5/maxDt;
+    if(!(ceiling&gt;floor))return null;
+    // Keep the adaptive calculation bounded. Extra points around the low end
+    // are useful where stable orbital peaks can be very narrow.
+    let series,method;
+    if(runs.length===1){
+      series=uniformFourier(runs[0],floor,ceiling);
+      method=&#x27;fft&#x27;;
+    }else{
+      const count=Math.min(1200,Math.ceil(72*Math.log2(ceiling/floor)));
+      const geometric=Array.from({length:count+1},(_,i)=&gt;floor*(ceiling/floor)**(i/count));
+      const lowBins=Array.from({length:160},(_,i)=&gt;floor*(1+i/8)).filter(f=&gt;f&lt;=ceiling);
+      const frequencies=[...new Set([...geometric,...lowBins])].sort((a,b)=&gt;a-b);
+      series={frequencies,amplitudes:frequencies.map(f=&gt;integrateAt(runs,f))};
+      method=&#x27;piecewise&#x27;;
+    }
+    const {frequencies,amplitudes}=series;
+    let peakIndex=0;
+    for(let i=1;i&lt;amplitudes.length;i++)if(amplitudes[i]&gt;amplitudes[peakIndex])peakIndex=i;
+    return {...series,method,peakHz:segment.varying?frequencies[peakIndex]||0:0,maxAmplitude:amplitudes[peakIndex]||0,
+      first:segment.first,last:segment.last,duration:segment.duration,spans:segment.spans,
+      completeNyquist:ceiling,mixedCadence:maxDt&gt;1.02*minDt};
+  }
+  const fmt=(v,n=4)=&gt;Number(v).toLocaleString(&#x27;en-US&#x27;,{maximumSignificantDigits:n});
+  function tickText(value){
+    if(value&gt;=0.01&amp;&amp;value&lt;1e4)return fmt(value,3);
+    return value.toExponential(1).replace(&#x27;.0e&#x27;,&#x27;e&#x27;).replace(&#x27;e+&#x27;,&#x27;e&#x27;);
+  }
+  function logGrid(min,max,map){
+    const ticks=[];
+    let occupied=-Infinity;
+    for(let exp=Math.floor(Math.log10(min));exp&lt;=Math.ceil(Math.log10(max));exp++){
+      for(const multiple of [1,2,5]){
+        const value=multiple*10**exp;
+        if(value&lt;min||value&gt;max)continue;
+        const pos=map(value);
+        if(pos-occupied&gt;=28){ticks.push({value,pos});occupied=pos;}
+      }
+    }
+    return ticks;
+  }
+  function paint(canvas,data,colors,frequencyUnit,component){
+    const width=canvas.clientWidth||320,height=canvas.clientHeight||240,dpr=Math.min(host.devicePixelRatio||1,2);
+    const pixelWidth=Math.round(width*dpr),pixelHeight=Math.round(height*dpr);
+    if(canvas.width!==pixelWidth||canvas.height!==pixelHeight){canvas.width=pixelWidth;canvas.height=pixelHeight;}
+    const ctx=canvas.getContext(&#x27;2d&#x27;);
+    const box={left:width&lt;380?59:69,top:28,right:width-11,bottom:height-41};
+    ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,width,height);
+    ctx.font=colors.font||&#x27;12px system-ui&#x27;;ctx.lineWidth=1;
+    ctx.fillStyle=colors.fg;ctx.textAlign=&#x27;left&#x27;;
+    ctx.fillText(component===&#x27;cross&#x27;?&#x27;|h̃×(f)| / h₀ (s)&#x27;:&#x27;|h̃₊(f)| / h₀ (s)&#x27;,8,16);
+    ctx.fillStyle=colors.bg;ctx.fillRect(box.left,box.top,box.right-box.left,box.bottom-box.top);
+    ctx.strokeStyle=colors.border;ctx.strokeRect(box.left,box.top,box.right-box.left,box.bottom-box.top);
+    ctx.fillStyle=colors.fg;ctx.textAlign=&#x27;center&#x27;;
+    ctx.fillText(t(&#x27;频率&#x27;,&#x27;Frequency&#x27;)+&#x27; f (&#x27;+frequencyUnit+&#x27;)&#x27;,(box.left+box.right)/2,height-5);
+    if(!data||!(data.maxAmplitude&gt;0)){
+      ctx.fillStyle=colors.muted;
+      const message=data?t(&#x27;当前记录的振幅为零&#x27;,&#x27;The measured amplitude is zero&#x27;):t(&#x27;等待足够的波形样本&#x27;,&#x27;Waiting for waveform samples&#x27;);
+      ctx.fillText(message,(box.left+box.right)/2,(box.top+box.bottom)/2,box.right-box.left-8);
+      return;
+    }
+    const {frequencies,amplitudes,maxAmplitude}=data,units=frequencyUnit===&#x27;mHz&#x27;?1000:1;
+    const xMin=frequencies[0],xMax=frequencies.at(-1);
+    const shownTop=10**(Math.ceil(2*Math.log10(maxAmplitude*1.2))/2);
+    let minPositive=maxAmplitude;
+    for(const amplitude of amplitudes)if(amplitude&gt;0)minPositive=Math.min(minPositive,amplitude);
+    const shownBottom=Math.max(maxAmplitude*1e-8,Math.min(minPositive*0.7,shownTop/10));
+    const x=f=&gt;box.left+Math.log(f/xMin)/Math.log(xMax/xMin)*(box.right-box.left);
+    const y=amp=&gt;box.bottom-Math.log(amp/shownBottom)/Math.log(shownTop/shownBottom)*(box.bottom-box.top);
+    ctx.fillStyle=colors.muted;ctx.strokeStyle=colors.border;
+    for(const {value,pos} of logGrid(xMin*units,xMax*units,v=&gt;x(v/units))){
+      ctx.beginPath();ctx.moveTo(pos,box.top);ctx.lineTo(pos,box.bottom);ctx.stroke();
+      ctx.textAlign=&#x27;center&#x27;;ctx.fillText(tickText(value),pos,box.bottom+15);
+    }
+    for(const {value,pos} of logGrid(shownBottom,shownTop,v=&gt;-y(v))){
+      ctx.beginPath();ctx.moveTo(box.left,-pos);ctx.lineTo(box.right,-pos);ctx.stroke();
+      ctx.textAlign=&#x27;right&#x27;;ctx.fillText(tickText(value),box.left-6,-pos+4);
+    }
+    ctx.save();
+    ctx.beginPath();ctx.rect(box.left,box.top,box.right-box.left,box.bottom-box.top);ctx.clip();
+    ctx.strokeStyle=component===&#x27;cross&#x27;?colors.cross:colors.plus;ctx.lineWidth=1.45;
+    ctx.beginPath();
+    let open=false;
+    for(let i=0;i&lt;frequencies.length;i++){
+      const amplitude=amplitudes[i];
+      if(!(amplitude&gt;0)){open=false;continue;}
+      const px=x(frequencies[i]),py=y(amplitude);
+      if(open)ctx.lineTo(px,py);else ctx.moveTo(px,py);
+      open=true;
+    }
+    ctx.stroke();ctx.restore();
+  }
+  function attach(root){
+    const panel=document.createElement(&#x27;section&#x27;);
+    panel.className=&#x27;frequency-domain-panel&#x27;;
+    panel.dataset.role=&#x27;frequency-domain&#x27;;
+    panel.innerHTML=`
+      &lt;div class=&quot;be-plot-heading&quot;&gt;&lt;h3&gt;引力波 · 频域&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;傅里叶振幅 · 双对数坐标&lt;/span&gt;&lt;/div&gt;
+      &lt;div class=&quot;spectrum-view frequency-domain-controls&quot;&gt;
+        &lt;label class=&quot;text-small&quot;&gt;偏振 &lt;select class=&quot;form-select&quot; aria-label=&quot;频域偏振&quot;&gt;&lt;option value=&quot;plus&quot;&gt;h₊&lt;/option&gt;&lt;option value=&quot;cross&quot;&gt;h×&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+        &lt;label class=&quot;form-check&quot;&gt;&lt;input class=&quot;form-check-input&quot; type=&quot;checkbox&quot;&gt;&lt;span class=&quot;form-check-label text-small&quot;&gt;端点渐消&lt;/span&gt;&lt;/label&gt;
+      &lt;/div&gt;
+      &lt;canvas class=&quot;frequency-domain-chart&quot; data-role=&quot;frequency-spectrum&quot; role=&quot;img&quot; aria-label=&quot;波形的傅里叶振幅，频率与振幅均采用对数坐标。&quot;&gt;波形的傅里叶振幅。&lt;/canvas&gt;
+      &lt;p class=&quot;spectrum-note text-small text-muted&quot; data-role=&quot;frequency-detail&quot;&gt;&lt;/p&gt;
+      &lt;p class=&quot;spectrum-note text-small text-muted&quot;&gt;振幅以秒为单位。有限记录可能产生频谱泄漏，端点渐消可减弱它。&lt;/p&gt;`;
+    const anchor=root.querySelector(&#x27;[data-role=&quot;frequency-domain&quot;]&#x27;);
+    if(anchor)anchor.replaceWith(panel);else root.querySelector(&#x27;[data-role=&quot;waveform&quot;]&#x27;).closest(&#x27;section&#x27;).append(panel);
+    host.OrbitLocale?.localize(panel,{
+      &#x27;引力波 · 频域&#x27;:&#x27;Gravitational wave · Frequency spectrum&#x27;,
+      &#x27;傅里叶振幅 · 双对数坐标&#x27;:&#x27;Fourier amplitude · Log-log axes&#x27;,
+      &#x27;偏振&#x27;:&#x27;Polarization&#x27;,&#x27;频域偏振&#x27;:&#x27;Frequency-domain polarization&#x27;,&#x27;端点渐消&#x27;:&#x27;Taper edges&#x27;,
+      &#x27;波形的傅里叶振幅，频率与振幅均采用对数坐标。&#x27;:&#x27;Fourier amplitude of the waveform. Both axes use logarithmic scales.&#x27;,
+      &#x27;波形的傅里叶振幅。&#x27;:&#x27;Fourier amplitude of the waveform.&#x27;,
+      &#x27;振幅以秒为单位。有限记录可能产生频谱泄漏，端点渐消可减弱它。&#x27;:&#x27;Amplitude is measured in seconds. A finite record can cause spectral leakage, which the edge taper helps reduce.&#x27;
+    });
+    const canvas=panel.querySelector(&#x27;canvas&#x27;),detail=panel.querySelector(&#x27;[data-role=&quot;frequency-detail&quot;]&#x27;);
+    const polarization=panel.querySelector(&#x27;select&#x27;),taper=panel.querySelector(&#x27;input&#x27;);
+    let latest=null,snapshot=null,computedAt=-Infinity;
+    function render(options,force=false){
+      latest=options;
+      if(root.hidden)return;
+      const {samples,bounds,tunit,colors,running=false,frequencyUnit=&#x27;Hz&#x27;,timeUnit=&#x27;s&#x27;,timeOrigin=0}=options;
+      const component=polarization.value,tapered=taper.checked;
+      const {start,end}=bounds,first=samples[0],last=samples.at(-1),now=performance.now();
+      const matching=snapshot&amp;&amp;snapshot.first===first&amp;&amp;snapshot.last===last&amp;&amp;snapshot.start===start&amp;&amp;
+        snapshot.end===end&amp;&amp;snapshot.tunit===tunit&amp;&amp;snapshot.component===component&amp;&amp;snapshot.tapered===tapered;
+      const sameRun=snapshot&amp;&amp;snapshot.last?.t&lt;=last?.t&amp;&amp;snapshot.tunit===tunit&amp;&amp;snapshot.component===component&amp;&amp;snapshot.tapered===tapered;
+      if(!matching&amp;&amp;(force||!running||!sameRun||now-computedAt&gt;=350)){
+        const data=integrate(samples,{start,end,tunit,component,taper:tapered});
+        snapshot={data,first,last,start,end,tunit,component,tapered};
+        computedAt=now;
+      }
+      const data=snapshot?.data;
+      paint(canvas,data,colors,frequencyUnit,component);
+      Object.assign(canvas.dataset,{method:data?.method||&#x27;&#x27;,peakHz:data?.peakHz||0,peakAmplitude:data?.maxAmplitude||0,
+        start:data?data.first*tunit:&#x27;&#x27;,end:data?data.last*tunit:&#x27;&#x27;,duration:data?.duration||0,spans:data?.spans||0,component});
+      if(!data){detail.textContent=&#x27;&#x27;;return;}
+      const scale=timeUnit===&#x27;h&#x27;?3600:1;
+      const actualStart=fmt((data.first-timeOrigin)*tunit/scale),actualEnd=fmt((data.last-timeOrigin)*tunit/scale);
+      const spanLabel=t(&#x27;记录区间&#x27;,&#x27;Recorded interval&#x27;)+&#x27; &#x27;+actualStart+&#x27; → &#x27;+actualEnd+&#x27; &#x27;+timeUnit;
+      const gapLabel=data.spans&gt;1?t(&#x27; · 仅积分已记录片段&#x27;,&#x27; · Recorded segments only&#x27;):&#x27;&#x27;;
+      const taperLabel=tapered?t(&#x27; · 两端各 5% 余弦渐消&#x27;,&#x27; · Cosine taper over 5% at each end&#x27;):&#x27;&#x27;;
+      const limit=fmt(data.completeNyquist*(frequencyUnit===&#x27;mHz&#x27;?1000:1))+&#x27; &#x27;+frequencyUnit;
+      const cadenceLabel=data.mixedCadence?t(
+        &#x27; · 最稀采样将频率上限限制在 &#x27;+limit,
+        &#x27; · The coarsest sampling limits the spectrum to &#x27;+limit
+      ):&#x27;&#x27;;
+      detail.textContent=spanLabel+gapLabel+taperLabel+cadenceLabel;
+    }
+    const refresh=()=&gt;{if(latest)render(latest,true);};
+    polarization.addEventListener(&#x27;change&#x27;,refresh);
+    taper.addEventListener(&#x27;change&#x27;,refresh);
+    document.addEventListener(&#x27;orbital-language&#x27;,refresh);
+    function clear(){snapshot=null;computedAt=-Infinity;}
+    return {render,clear};
+  }
+  const api={integrate,attach};
+  if(typeof module===&#x27;object&#x27;&amp;&amp;module.exports)module.exports=api;else host.OrbitFourier=api;
 })(typeof window===&#x27;object&#x27;?window:globalThis);
 
 /* Local, nonspinning binary toy: fitted remnant + fundamental (2,2,0) QNM.
@@ -2752,6 +3217,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       const a=history[j],b=history[Math.min(j+1,history.length-1)],span=b.t-a.t;
       const z=span&gt;0?Math.max(0,Math.min(1,(t-a.t)/span)):0,z2=z*z,z3=z2*z,sample={t};
       if(Number.isFinite(a.windowFrequency)&amp;&amp;Number.isFinite(b.windowFrequency))sample.windowFrequency=a.windowFrequency+(b.windowFrequency-a.windowFrequency)*z;
+      for(const key of [&#x27;orbitX&#x27;,&#x27;orbitY&#x27;])if(Number.isFinite(a[key])&amp;&amp;Number.isFinite(b[key]))sample[key]=a[key]+(b[key]-a[key])*z;
       for(const key of [&#x27;plus&#x27;,&#x27;cross&#x27;])sample[key]=(2*z3-3*z2+1)*a[key]+(z3-2*z2+z)*span*a[key+&#x27;Slope&#x27;]+(-2*z3+3*z2)*b[key]+(z3-z2)*span*b[key+&#x27;Slope&#x27;];
       result.push(sample);
     }return result;
@@ -3084,11 +3550,17 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       &lt;g data-role=&quot;velocityA&quot; class=&quot;be-drag&quot; data-drag=&quot;velocityA&quot;&gt;&lt;circle r=&quot;22&quot; fill=&quot;transparent&quot;/&gt;&lt;circle r=&quot;6&quot; fill=&quot;var(--background)&quot; stroke=&quot;var(--viz-series-1)&quot; stroke-width=&quot;2&quot;/&gt;&lt;/g&gt;
       &lt;g data-role=&quot;velocityB&quot; class=&quot;be-drag&quot; data-drag=&quot;velocityB&quot;&gt;&lt;circle r=&quot;22&quot; fill=&quot;transparent&quot;/&gt;&lt;circle r=&quot;6&quot; fill=&quot;var(--background)&quot; stroke=&quot;var(--viz-series-2)&quot; stroke-width=&quot;2&quot;/&gt;&lt;/g&gt;
       &lt;g data-role=&quot;remnant&quot; hidden&gt;&lt;ellipse data-role=&quot;remnant-disc&quot; fill=&quot;var(--background)&quot; stroke=&quot;var(--viz-series-1)&quot; stroke-width=&quot;2&quot;/&gt;&lt;text data-role=&quot;remnant-label&quot; class=&quot;text-small&quot; text-anchor=&quot;middle&quot;&gt;剩余黑洞 · 形状示意&lt;/text&gt;&lt;/g&gt;
+      &lt;g data-role=&quot;linked-orbit&quot; class=&quot;be-linked-orbit&quot; hidden aria-hidden=&quot;true&quot;&gt;
+        &lt;line data-role=&quot;linked-connector&quot; stroke=&quot;var(--foreground)&quot; stroke-dasharray=&quot;3 3&quot;/&gt;
+        &lt;circle data-role=&quot;linked-A&quot; r=&quot;9&quot; fill=&quot;var(--background)&quot; stroke=&quot;var(--viz-series-1)&quot; stroke-width=&quot;2.5&quot;/&gt;
+        &lt;circle data-role=&quot;linked-B&quot; r=&quot;9&quot; fill=&quot;var(--background)&quot; stroke=&quot;var(--viz-series-2)&quot; stroke-width=&quot;2.5&quot;/&gt;
+      &lt;/g&gt;
     &lt;/g&gt;
     &lt;g data-role=&quot;scale&quot; stroke=&quot;var(--foreground)&quot;&gt;&lt;path data-role=&quot;scaleline&quot; fill=&quot;none&quot;/&gt;&lt;text data-role=&quot;scalelabel&quot; stroke=&quot;none&quot; class=&quot;text-small&quot;/&gt;&lt;/g&gt;
     &lt;text data-role=&quot;orbitnote&quot; class=&quot;text-small&quot; x=&quot;12&quot; y=&quot;26&quot;&gt;拖动星体 / 空心速度端点&lt;/text&gt;
   &lt;/svg&gt;
   &lt;div class=&quot;be-legend text-small&quot;&gt;&lt;span&gt;&lt;i class=&quot;be-swatch&quot; style=&quot;background:var(--viz-series-1)&quot;&gt;&lt;/i&gt;星 A&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;be-swatch&quot; style=&quot;background:var(--viz-series-2)&quot;&gt;&lt;/i&gt;星 B&lt;/span&gt;&lt;span class=&quot;text-muted&quot;&gt;虚线：初始开普勒轨道&lt;/span&gt;&lt;/div&gt;
+  &lt;output class=&quot;be-linked-readout text-small tabular-nums&quot; data-role=&quot;linked-orbit-note&quot; hidden&gt;&lt;/output&gt;
   &lt;div class=&quot;be-metrics be-readouts tabular-nums&quot;&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;时间&lt;/span&gt;&lt;output data-value=&quot;time&quot;&gt;0.0000 s&lt;/output&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;间距&lt;/span&gt;&lt;output data-value=&quot;distance&quot;&gt;3,000.0 km&lt;/output&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;牛顿密切偏心率&lt;/span&gt;&lt;output data-value=&quot;eccentricity&quot;&gt;0.000&lt;/output&gt;&lt;/span&gt;&lt;/div&gt;
   &lt;div class=&quot;be-status text-small&quot; data-role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
   &lt;div class=&quot;be-metrics text-small tabular-nums&quot; data-role=&quot;remnant-info&quot; hidden&gt;&lt;/div&gt;
@@ -3102,19 +3574,45 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       &lt;span class=&quot;text-muted&quot; data-role=&quot;wave-view&quot;&gt;最近 8 T₀&lt;/span&gt;
     &lt;/div&gt;
     &lt;label class=&quot;form-check&quot;&gt;&lt;input class=&quot;form-check-input&quot; type=&quot;checkbox&quot; data-role=&quot;late-view&quot; checked disabled&gt;&lt;span class=&quot;form-check-label text-small&quot;&gt;放大并合与铃宕（进入末段后，取消可看旋近啁啾）&lt;/span&gt;&lt;/label&gt;
+    &lt;div data-role=&quot;frequency-domain&quot;&gt;&lt;/div&gt;
     &lt;div class=&quot;be-plot-heading&quot;&gt;&lt;h3&gt;引力波 · 时频&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot; data-role=&quot;spectrum-method&quot;&gt;h₊ · STFT&lt;/span&gt;&lt;/div&gt;
     &lt;div class=&quot;spectrum-view&quot;&gt;
       &lt;label class=&quot;form-check&quot;&gt;&lt;input class=&quot;form-check-input&quot; type=&quot;checkbox&quot; data-role=&quot;spectrum-track&quot; checked&gt;&lt;span class=&quot;form-check-label text-small&quot;&gt;模型瞬时频率&lt;/span&gt;&lt;/label&gt;
       &lt;label class=&quot;form-check&quot; title=&quot;进入示意并合过渡后可用&quot;&gt;&lt;input class=&quot;form-check-input&quot; type=&quot;checkbox&quot; data-role=&quot;spectrum-before&quot; disabled&gt;&lt;span class=&quot;form-check-label text-small&quot;&gt;并合前视图&lt;/span&gt;&lt;/label&gt;
     &lt;/div&gt;
-    &lt;canvas class=&quot;spectrum-chart&quot; data-role=&quot;spectrogram&quot; role=&quot;img&quot; aria-describedby=&quot;be-spectrum-note&quot; aria-label=&quot;h加偏振波形的时频图，横轴为分析窗中心时间，纵轴为频率，颜色表示相对功率。&quot;&gt;引力波时频图：频率以 Hz 表示，颜色表示相对功率。&lt;/canvas&gt;
+    &lt;canvas class=&quot;spectrum-chart be-linked-spectrum&quot; data-role=&quot;spectrogram&quot; tabindex=&quot;0&quot; role=&quot;img&quot; aria-describedby=&quot;be-spectrum-note be-spectrogram-link&quot; aria-label=&quot;h加偏振波形的时频图，横轴为分析窗中心时间，纵轴为频率，颜色表示相对功率。&quot;&gt;引力波时频图：频率以 Hz 表示，颜色表示相对功率。&lt;/canvas&gt;
     &lt;p id=&quot;be-spectrum-note&quot; class=&quot;spectrum-note text-small text-muted&quot; data-role=&quot;spectrum-note&quot;&gt;&lt;/p&gt;
+    &lt;div id=&quot;be-spectrogram-link&quot; class=&quot;be-spectrogram-link text-small&quot;&gt;
+      &lt;span class=&quot;text-muted&quot;&gt;点选时频图，或用左右方向键定位轨道与波形。&lt;/span&gt;
+      &lt;output data-role=&quot;linked-time&quot; class=&quot;tabular-nums&quot; aria-live=&quot;polite&quot; hidden&gt;&lt;/output&gt;
+      &lt;button type=&quot;button&quot; class=&quot;btn btn-outline-secondary btn-sm&quot; data-action=&quot;clear-link&quot; hidden&gt;清除定位&lt;/button&gt;
+    &lt;/div&gt;
     &lt;div class=&quot;be-wave-footer text-small&quot;&gt;&lt;output class=&quot;tabular-nums&quot; data-value=&quot;gw-frequency&quot;&gt;&lt;/output&gt;&lt;span class=&quot;text-muted&quot; data-role=&quot;gw-status&quot;&gt;等待开始演化&lt;/span&gt;&lt;/div&gt;
     &lt;div class=&quot;be-eccentricity&quot;&gt;
       &lt;div class=&quot;be-plot-heading&quot;&gt;&lt;h3&gt;偏心率随时间演化&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;每个径向周期一点&lt;/span&gt;&lt;/div&gt;
       &lt;canvas class=&quot;be-eccentricity-chart&quot; data-role=&quot;eccentricity-chart&quot; role=&quot;img&quot; aria-label=&quot;径向偏心率随物理时间变化&quot; aria-describedby=&quot;be-eccentricity-note&quot;&gt;径向偏心率演化图&lt;/canvas&gt;
       &lt;output class=&quot;text-small tabular-nums&quot; data-value=&quot;radial-eccentricity&quot;&gt;&lt;/output&gt;
       &lt;p class=&quot;text-small text-muted&quot; id=&quot;be-eccentricity-note&quot;&gt;用近心和远心半径估计 eᵣ = (rₐ − rₚ)/(rₐ + rₚ)，并用相邻同类转折点修正慢漂移。并合前只记录完整径向周期，估计值依赖所选坐标。&lt;/p&gt;
+      &lt;details class=&quot;be-comparison&quot; data-role=&quot;comparison&quot;&gt;
+        &lt;summary&gt;偏心双星对照实验&lt;/summary&gt;
+        &lt;p class=&quot;text-small text-muted&quot;&gt;两次积分使用同一初态和保守阶数，比较关闭耗散与物理倍率 ×1。&lt;/p&gt;
+        &lt;div class=&quot;be-comparison-actions&quot;&gt;
+          &lt;button class=&quot;btn btn-primary btn-sm&quot; type=&quot;button&quot; data-action=&quot;compare-current&quot;&gt;比较当前初态&lt;/button&gt;
+          &lt;button class=&quot;btn btn-outline-secondary btn-sm&quot; type=&quot;button&quot; data-action=&quot;compare-example&quot;&gt;载入偏心示例并比较&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;be-comparison-legend text-small&quot; data-role=&quot;comparison-legend&quot; hidden&gt;
+          &lt;span&gt;&lt;i class=&quot;be-comparison-current&quot;&gt;&lt;/i&gt;当前演化&lt;/span&gt;
+          &lt;span&gt;&lt;i class=&quot;be-comparison-off&quot;&gt;&lt;/i&gt;关闭耗散&lt;/span&gt;
+          &lt;span&gt;&lt;i class=&quot;be-comparison-on&quot;&gt;&lt;/i&gt;物理耗散 ×1&lt;/span&gt;
+          &lt;span data-role=&quot;comparison-peters&quot;&gt;&lt;i class=&quot;be-comparison-peters&quot;&gt;&lt;/i&gt;Peters 周期平均&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;be-comparison-readouts&quot; data-role=&quot;comparison-results&quot; hidden&gt;
+          &lt;div&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;关闭耗散&lt;/span&gt;&lt;output class=&quot;tabular-nums&quot; data-role=&quot;comparison-off&quot;&gt;&lt;/output&gt;&lt;/div&gt;
+          &lt;div&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;物理耗散 ×1&lt;/span&gt;&lt;output class=&quot;tabular-nums&quot; data-role=&quot;comparison-on&quot;&gt;&lt;/output&gt;&lt;/div&gt;
+        &lt;/div&gt;
+        &lt;p class=&quot;text-small&quot; data-role=&quot;comparison-status&quot; role=&quot;status&quot;&gt;&lt;/p&gt;
+        &lt;p class=&quot;text-small text-muted&quot; data-role=&quot;comparison-reference&quot; hidden&gt;&lt;a href=&quot;https://doi.org/10.1103/PhysRev.136.B1224&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;Peters（1964）&lt;/a&gt;&lt;span data-role=&quot;comparison-reference-note&quot;&gt;&lt;/span&gt;&lt;/p&gt;
+      &lt;/details&gt;
     &lt;/div&gt;
     &lt;span class=&quot;be-color-probe&quot; aria-hidden=&quot;true&quot;&gt;&lt;/span&gt;
   &lt;/section&gt;
@@ -3204,10 +3702,21 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     &#x27;并合前视图&#x27;:&#x27;Pre-merger view&#x27;,
     &#x27;h加偏振波形的时频图，横轴为分析窗中心时间，纵轴为频率，颜色表示相对功率。&#x27;:&#x27;Time-frequency view of the plus polarization. The axes show window center time and frequency, and color shows relative power.&#x27;,
     &#x27;引力波时频图：频率以 Hz 表示，颜色表示相对功率。&#x27;:&#x27;Gravitational-wave spectrogram: frequency in Hz and color in relative power.&#x27;,
+    &#x27;点选时频图，或用左右方向键定位轨道与波形。&#x27;:&#x27;Click the spectrogram or use the arrow keys to locate the orbit and waveform.&#x27;,
+    &#x27;清除定位&#x27;:&#x27;Clear selection&#x27;,
     &#x27;偏心率随时间演化&#x27;:&#x27;Eccentricity evolution&#x27;,
     &#x27;每个径向周期一点&#x27;:&#x27;One point per radial cycle&#x27;,
     &#x27;径向偏心率随物理时间变化&#x27;:&#x27;Radial eccentricity over physical time&#x27;,
     &#x27;径向偏心率演化图&#x27;:&#x27;Radial eccentricity plot&#x27;,
+    &#x27;偏心双星对照实验&#x27;:&#x27;Eccentric binary comparison&#x27;,
+    &#x27;两次积分使用同一初态和保守阶数，比较关闭耗散与物理倍率 ×1。&#x27;:&#x27;Both runs use the same initial state and conservative order. Compare dissipation off with physical dissipation ×1.&#x27;,
+    &#x27;比较当前初态&#x27;:&#x27;Compare current initial state&#x27;,
+    &#x27;载入偏心示例并比较&#x27;:&#x27;Load eccentric example and compare&#x27;,
+    &#x27;当前演化&#x27;:&#x27;Current run&#x27;,
+    &#x27;关闭耗散&#x27;:&#x27;Dissipation off&#x27;,
+    &#x27;物理耗散 ×1&#x27;:&#x27;Physical dissipation ×1&#x27;,
+    &#x27;Peters 周期平均&#x27;:&#x27;Peters orbit average&#x27;,
+    &#x27;Peters（1964）&#x27;:&#x27;Peters (1964)&#x27;,
     &#x27;用近心和远心半径估计 eᵣ = (rₐ − rₚ)/(rₐ + rₚ)，并用相邻同类转折点修正慢漂移。并合前只记录完整径向周期，估计值依赖所选坐标。&#x27;:
       &#x27;Estimate eᵣ = (rₐ − rₚ)/(rₐ + rₚ) from the turning-point radii, allowing for slow inspiral drift. Only complete pre-merger radial cycles are shown. The estimate depends on the coordinates.&#x27;,
     &#x27;等待开始演化&#x27;:&#x27;Waiting for playback&#x27;,
@@ -3352,7 +3861,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   }
   function wavePoint(s,t,m) {
     const [x,y,vx,vy]=s,r=Math.hypot(x,y),rv=x*vx+y*vy,a=derivative(s,m),q=quadrupole(s);
-    return {t,...q,
+    return {t,...q,orbitX:x,orbitY:y,
       // A Kepler binding-energy scale for selecting the analysis window only.
       // It is constant on a Newtonian ellipse, unlike instantaneous phase speed.
       windowFrequency:Math.max(0,-2*PN.invariants(s,m).energy)**1.5/Math.PI,
@@ -3360,7 +3869,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       crossSlope:a[2]*vy+vx*a[3]-(vx*y+x*vy)/r**3+3*x*y*rv/r**5};
   }
   const GW_INITIAL_DT=TAU/256, GW_VIEW=8*TAU;
-  let radialHistory;
+  let radialHistory,comparison=null;
   let p=clean(window.openai?.widgetState?.modelContent?.parameters), model=makeModel(p), state=initial(p);
   let time=0, running=false, stopped=null, trail=[], reference=[], e0=0, h0=0, last=0, raf=0, drag=null,post=null;
   let w=736,h=350,extent=1.4,scale=100,cx=368,cy=175,velocityScale=80,chartDirty=true;
@@ -3369,8 +3878,9 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   const fixed=(v,n)=&gt;Number(v).toLocaleString(&#x27;zh-CN&#x27;,{minimumFractionDigits:n,maximumFractionDigits:n});
   const gw={samples:[],columns:[],recent:[],dt:GW_INITIAL_DT,next:GW_INITIAL_DT,size:512,
     viewBounds:{start:0,end:GW_VIEW},viewTween:null,viewEase:1,amplitudeLimit:null,frequencyLimits:null,
-    visible:{plus:true,cross:true},dirty:true,lastDraw:0,colors:null,hover:null};
+    visible:{plus:true,cross:true},dirty:true,lastDraw:0,colors:null,locator:null,spectrumPlot:null};
   const spectral=SP.attach(root,&#x27;binarySpectrum&#x27;,rebuild=&gt;{if(rebuild)rebuildSpectrum();gw.dirty=true;if(!root.hidden)drawGW(true);});
+  const fourier=window.OrbitFourier.attach(root);
   const spectrumGuides=[{key:&#x27;frequency&#x27;,get label(){return t(&#x27;模型瞬时频率&#x27;,&#x27;Model instantaneous frequency&#x27;);},phase:true}];
   function sampleWave() {
     const q=post?RD.valueAt(post,time):wavePoint(state,time,model),sample={t:time,...q};
@@ -3394,10 +3904,11 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   }
   function resetWave() {
     spectral.clearCache();
+    fourier.clear();
     gw.samples=[];gw.columns=[];gw.dt=GW_INITIAL_DT;gw.next=gw.dt;
     gw.size=spectral.size();
     gw.recent=[wavePoint(state,time,model)];gw.viewTween=null;gw.viewBounds={start:0,end:GW_VIEW};gw.amplitudeLimit=null;gw.frequencyLimits=null;
-    gw.hover=null;sampleWave();
+    gw.locator=null;gw.spectrumPlot=null;sampleWave();
   }
   function refineWaveSampling(localDt) {
     // Refine waveform sampling when the dynamics require it. The STFT reconstructs
@@ -3476,9 +3987,9 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     ctx.fillStyle=colors.fg;ctx.textAlign=&#x27;center&#x27;;ctx.fillText(xlabel,box.x+box.width/2,height-2);
   }
   function drawWaveform() {
-    const plot=canvasFrame(&#x27;waveform&#x27;,200),{ctx,box,colors,x,start}=plot;
-    const samples=gw.samples.filter(s=&gt;s.t&gt;=start-GW_INITIAL_DT);
-    let peak=post?post.amplitudeMax:0.2;
+    const plot=canvasFrame(&#x27;waveform&#x27;,200,18,linkedWaveBounds()),{ctx,box,colors,x,start,end}=plot;
+    const samples=gw.samples.filter(s=&gt;s.t&gt;=start-GW_INITIAL_DT&amp;&amp;s.t&lt;=end+GW_INITIAL_DT);
+    let peak=post&amp;&amp;!gw.locator?post.amplitudeMax:0.2;
     for(const s of samples)for(const key of [&#x27;plus&#x27;,&#x27;cross&#x27;])if(gw.visible[key])peak=Math.max(peak,Math.abs(s[key]));
     let ylim=Math.ceil(peak*1.12*4)/4;
     if(gw.viewTween&amp;&amp;gw.viewTween.amplitude)ylim=gw.viewTween.amplitude+(ylim-gw.viewTween.amplitude)*gw.viewEase;
@@ -3491,6 +4002,14 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       ctx.strokeStyle=colors[key];ctx.lineWidth=1.5;ctx.setLineDash(key===&#x27;cross&#x27;?[5,3]:[]);ctx.beginPath();
       samples.forEach((s,i)=&gt;{if(i===0)ctx.moveTo(x(s.t),y(s[key]));else ctx.lineTo(x(s.t),y(s[key]));});ctx.stroke();
     }
+    if(gw.locator){
+      const px=x(gw.locator.sample.t);
+      ctx.strokeStyle=colors.fg;ctx.lineWidth=1;ctx.setLineDash([4,3]);ctx.beginPath();
+      ctx.moveTo(px,box.y);ctx.lineTo(px,box.y+box.height);ctx.stroke();ctx.setLineDash([]);
+      for(const key of [&#x27;plus&#x27;,&#x27;cross&#x27;])if(gw.visible[key]){
+        ctx.fillStyle=colors[key];ctx.beginPath();ctx.arc(px,y(gw.locator.sample[key]),3.5,0,TAU);ctx.fill();
+      }
+    }
     ctx.restore();ctx.setLineDash([]);
     if(post){
       ctx.strokeStyle=colors.muted;ctx.fillStyle=colors.muted;ctx.setLineDash([3,4]);
@@ -3502,7 +4021,11 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     }
     if(time===0){ctx.fillStyle=colors.muted;ctx.textAlign=&#x27;center&#x27;;ctx.fillText(t(&#x27;开始演化后生成波形&#x27;,&#x27;Start playback to generate the waveform&#x27;),box.x+box.width/2,box.y+box.height/2-12);}
     plot.canvas.dataset.samples=String(gw.samples.length);
-    plot.canvas.dataset.start=String(plot.start);plot.canvas.dataset.end=String(plot.end);
+    Object.assign(plot.canvas.dataset,{start:plot.start,end:plot.end,cursorTime:gw.locator?gw.locator.sample.t*model.tunit:&#x27;&#x27;});
+  }
+  function linkedWaveBounds(){
+    const selected=gw.locator?.sample.t;
+    return selected&lt;gw.viewBounds.start||selected&gt;gw.viewBounds.end?gw.locator.bounds:gw.viewBounds;
   }
   function drawSpectrogram() {
     const before=!!post&amp;&amp;role(&#x27;spectrum-before&#x27;).checked;
@@ -3515,41 +4038,75 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       state:gw,bounds,colors:gwColors(),tunit:model.tunit,before,timeOrigin:post?.start??null,
       frequencyFloor:initialFrequency/4,frequencyCeiling:Math.max(2*initialFrequency,1.2*endpoint),
       focusReference:zoomed&amp;&amp;joinFrequency&gt;0?joinFrequency:initialFrequency,
-      previousLimit:!before?gw.viewTween?.frequency:null,ease:gw.viewEase,guides:spectrumGuides,
+      previousLimit:!before?gw.viewTween?.frequency:null,ease:gw.viewEase,guides:spectrumGuides,cursorTime:gw.locator?.sample.t,
       emptyLabel:time===0?t(&#x27;等待波形采样&#x27;,&#x27;Waiting for waveform samples&#x27;):undefined
     });
+    gw.spectrumPlot=result;
     if(result&amp;&amp;!before)gw.frequencyLimits=result.limits;
     return result?.status||&#x27;&#x27;;
   }
+  function nearestWaveSample(at,bounds){
+    let lo=0,hi=gw.samples.length;
+    while(lo&lt;hi){const mid=(lo+hi)&gt;&gt;&gt;1;if(gw.samples[mid].t&lt;at)lo=mid+1;else hi=mid;}
+    return [gw.samples[lo-1],gw.samples[lo]].filter(sample=&gt;sample&amp;&amp;sample.t&gt;=bounds.start&amp;&amp;sample.t&lt;=bounds.end)
+      .sort((a,b)=&gt;Math.abs(a.t-at)-Math.abs(b.t-at))[0];
+  }
+  function nearestPericenter(at){
+    if(!radialHistory.count)return null;
+    let nearest=null;
+    const radius2=sample=&gt;sample.orbitX**2+sample.orbitY**2;
+    for(let i=1;i&lt;gw.samples.length-1;i++){
+      const sample=gw.samples[i],r=radius2(sample);
+      if(r&lt;radius2(gw.samples[i-1])&amp;&amp;r&lt;=radius2(gw.samples[i+1])&amp;&amp;
+        (nearest===null||Math.abs(sample.t-at)&lt;Math.abs(nearest-at)))nearest=sample.t;
+    }
+    return nearest;
+  }
+  function locateWave(at,bounds){
+    const last=gw.samples.at(-1);
+    if(gw.samples.length&lt;2||at&lt;gw.samples[0].t||at&gt;last.t+1e-9)return;
+    const sample=nearestWaveSample(at,bounds);
+    if(!sample||Math.abs(sample.t-at)&gt;2*(sample.dt||GW_INITIAL_DT))return;
+    gw.locator={sample,bounds,peri:sample.segment===&#x27;orbit&#x27;?nearestPericenter(sample.t):null};
+    running=false;chartDirty=true;draw();
+  }
+  function clearLink(){gw.locator=null;chartDirty=true;}
   function drawEccentricity() {
     const {points,count}=radialHistory,latest=points.at(-1);
-    const start=count&gt;points.length?points[0].start:0;
-    const end=Math.max(start+TAU,(post?.start??time));
-    const peak=points.reduce((max,point)=&gt;Math.max(max,point.e),0);
+    const run=role(&#x27;comparison&#x27;).open?comparison:null;
+    const start=run?.duration?0:count&gt;points.length?points[0].start:0;
+    const end=Math.max(start+TAU,(post?.start??time),run?.endTime||0);
+    const groups=[points,run?.off||[],run?.on||[],run?.peters||[]];
+    const peak=Math.max(0,...groups.flatMap(series=&gt;series.map(point=&gt;point.e)));
     const ymax=[0.02,0.05,0.1,0.2,0.3,0.4,0.5,0.6,0.8,1].find(limit=&gt;limit&gt;=1.08*peak)??1;
     const canvas=role(&#x27;eccentricity-chart&#x27;);
     const plot=canvasFrame(&#x27;eccentricity-chart&#x27;,canvas.clientHeight||184,18,{start,end});
     const {ctx,box,colors,x}=plot;
     plotAxes(plot,0,ymax,t(&#x27;径向偏心率 eᵣ&#x27;,&#x27;Radial eccentricity eᵣ&#x27;),t(&#x27;时间 t (s)&#x27;,&#x27;Time t (s)&#x27;));
     const y=e=&gt;box.y+box.height*(1-e/ymax);
-    if(latest){
-      ctx.strokeStyle=ctx.fillStyle=colors.plus;ctx.lineWidth=1.7;
+    const strokes=[colors.plus,colors.muted,colors.cross,&#x27;#508879&#x27;];
+    const dashes=[[],[5,4],[],[2,3]];
+    groups.forEach((series,index)=&gt;{
+      if(!series.length)return;
+      ctx.strokeStyle=ctx.fillStyle=strokes[index];ctx.lineWidth=1.7;ctx.setLineDash(dashes[index]);
       ctx.beginPath();
-      points.forEach(({time,e},index)=&gt;index?ctx.lineTo(x(time),y(e)):ctx.moveTo(x(time),y(e)));
+      series.forEach(({time,e},i)=&gt;i?ctx.lineTo(x(time),y(e)):ctx.moveTo(x(time),y(e)));
       ctx.stroke();
-      if(points.length&lt;=140){
+      if(index&lt;3&amp;&amp;series.length&lt;=140){
         ctx.beginPath();
-        for(const point of points){
+        for(const point of series){
           const px=x(point.time),py=y(point.e);
           ctx.moveTo(px+2,py);ctx.arc(px,py,2,0,TAU);
         }
         ctx.fill();
       }
-    }
-    const waiting=time===0?t(&#x27;开始演化后积累径向周期&#x27;,&#x27;Play to collect radial cycles&#x27;):
+    });
+    ctx.setLineDash([]);
+    const waiting=run?.off.length?t(&#x27;当前演化尚无完整径向周期&#x27;,&#x27;The current run has no complete radial cycle yet&#x27;):
+      time===0?t(&#x27;开始演化后积累径向周期&#x27;,&#x27;Play to collect radial cycles&#x27;):
       stopped||post?t(&#x27;未获得完整的径向振荡周期&#x27;,&#x27;No complete radial oscillation recorded&#x27;):
       t(&#x27;等待完整的径向振荡周期…&#x27;,&#x27;Waiting for a complete radial cycle…&#x27;);
-    if(!latest){
+    if(!groups.some(series=&gt;series.length&gt;1)){
       ctx.fillStyle=colors.muted;ctx.textAlign=&#x27;center&#x27;;
       ctx.fillText(waiting,box.x+box.width/2,box.y+box.height/2,box.width-12);
     }
@@ -3559,13 +4116,67 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     Object.assign(canvas.dataset,{cycles:count,firstE:points[0]?.e??&#x27;&#x27;,lastE:latest?.e??&#x27;&#x27;,
       firstTime:points[0]?points[0].time*model.tunit:&#x27;&#x27;,lastTime:latest?latest.time*model.tunit:&#x27;&#x27;});
   }
+  function comparisonValue(points,when){
+    const i=points.findIndex(point=&gt;point.time&gt;=when);
+    if(i&lt;0)return null;
+    const b=points[i];
+    if(b.time===when)return b.e;
+    if(!i)return null;
+    const a=points[i-1];
+    return a.e+(b.e-a.e)*(when-a.time)/(b.time-a.time);
+  }
+  function comparisonMessage(reason){
+    switch(reason){
+      case &#x27;duration&#x27;: return t(&#x27;完成 32 个初始开普勒周期的对照。&#x27;,&#x27;Finished the comparison over 32 initial Kepler periods.&#x27;);
+      case &#x27;unbound&#x27;: return t(&#x27;请选择束缚轨道。&#x27;,&#x27;Choose a bound orbit.&#x27;);
+      case &#x27;strong-field&#x27;: return t(&#x27;弱场对照止于 r &lt; 20 GM/c² 或 v &gt; 0.3c。&#x27;,&#x27;The weak-field comparison stops at r &lt; 20 GM/c² or v &gt; 0.3c.&#x27;);
+      case &#x27;near-circular&#x27;: return t(&#x27;此初态接近圆轨道。请试试偏心示例。&#x27;,&#x27;This orbit is nearly circular. Try the eccentric example.&#x27;);
+      case &#x27;step-limit&#x27;: return t(&#x27;达到本地积分步数上限。&#x27;,&#x27;The integration reached its local step limit.&#x27;);
+      default: return t(&#x27;当前初态无法继续积分。&#x27;,&#x27;Integration could not continue for these initial conditions.&#x27;);
+    }
+  }
+  function drawComparison(){
+    const run=comparison,ready=Boolean(run?.duration);
+    const showPeters=Boolean(run?.peters.length&gt;1);
+    role(&#x27;comparison-legend&#x27;).hidden=!ready;
+    role(&#x27;comparison-peters&#x27;).hidden=!showPeters;
+    role(&#x27;comparison-reference&#x27;).hidden=!ready;
+    const common=ready?Math.min(run.off.at(-1)?.time??-1,run.on.at(-1)?.time??-1):-1;
+    const values=ready?[comparisonValue(run.off,common),comparisonValue(run.on,common)]:[];
+    const comparable=Boolean(run?.done&amp;&amp;values.length===2&amp;&amp;values.every(Number.isFinite));
+    role(&#x27;comparison-results&#x27;).hidden=!comparable;
+    if(comparable){
+      role(&#x27;comparison-off&#x27;).textContent=&#x27;eᵣ = &#x27;+fixed(values[0],4);
+      role(&#x27;comparison-on&#x27;).textContent=&#x27;eᵣ = &#x27;+fixed(values[1],4);
+    }
+    const title=!run?&#x27;&#x27;:run.done?comparisonMessage(run.reason):t(&#x27;正在积分同初态的两条轨道…&#x27;,&#x27;Integrating both trajectories…&#x27;);
+    const status=title+(comparable?&#x27; t = &#x27;+tickNumber(common*model.tunit)+&#x27; s&#x27;:&#x27;&#x27;);
+    if(role(&#x27;comparison-status&#x27;).textContent!==status)role(&#x27;comparison-status&#x27;).textContent=status;
+    const referenceE=comparable?comparisonValue(run.peters,common):null;
+    const referenceValue=Number.isFinite(referenceE)?t(&#x27; 同一时刻 e ≈ &#x27;,&#x27; At the same time, e ≈ &#x27;)+fixed(referenceE,4)+t(&#x27;。&#x27;,&#x27;.&#x27;):&#x27;&#x27;;
+    const referenceNote=run?.petersReason&amp;&amp;!showPeters?t(&#x27; 的周期平均参考在此初态不适用。&#x27;,&#x27; orbit-averaged reference is unavailable for these initial conditions.&#x27;):
+      t(&#x27; 从初始牛顿轨道元素出发，只覆盖弱场、缓慢旋近。&#x27;,&#x27; starts from Newtonian orbital elements and covers only weak-field, slow inspiral.&#x27;)+
+      (model.pn?t(&#x27; 与 PN 径向偏心率的对照是定性的。&#x27;,&#x27; Comparison with the PN radial eccentricity is qualitative.&#x27;):&#x27;&#x27;)+referenceValue;
+    const reference=role(&#x27;comparison-reference-note&#x27;);
+    if(reference.textContent!==referenceNote)reference.textContent=referenceNote;
+    Object.assign(role(&#x27;comparison&#x27;).dataset,{status:run?.done?run.reason:run?&#x27;running&#x27;:&#x27;&#x27;,offCycles:run?.off.length??0,
+      onCycles:run?.on.length??0,petersPoints:run?.peters.length??0,comparisonTime:comparable?common*model.tunit:&#x27;&#x27;,
+      offE:comparable?values[0]:&#x27;&#x27;,onE:comparable?values[1]:&#x27;&#x27;});
+  }
+  function startComparison(){
+    comparison=window.BinaryOrbitComparison.create({state:initial(p,model),model,step:rk4,stepSize:localStep});
+    gw.dirty=true;drawGW(true);
+  }
   function drawGW(force=false) {
     const now=performance.now();if(!gw.dirty&amp;&amp;!force)return;if(!force&amp;&amp;now-gw.lastDraw&lt;(gw.viewTween?25:80))return;
     updateWaveView();
-    drawWaveform();const status=drawSpectrogram();drawEccentricity();gw.lastDraw=now;gw.dirty=false;
+    drawWaveform();
+    fourier.render({samples:gw.samples,bounds:linkedWaveBounds(),tunit:model.tunit,colors:gwColors(),running});
+    const status=drawSpectrogram();drawEccentricity();drawComparison();gw.lastDraw=now;gw.dirty=false;
     const o=orbit(state),frequency=post?Math.abs(RD.valueAt(post,time).omega)/(TAU*model.tunit):Math.abs(o.h)/(Math.PI*o.r*o.r*model.tunit);
     out(&#x27;gw-frequency&#x27;,(post?t(&#x27;波形瞬时频率 ≈ &#x27;,&#x27;Instantaneous waveform frequency ≈ &#x27;):t(&#x27;瞬时 2f轨道 ≈ &#x27;,&#x27;Instantaneous 2f_orb ≈ &#x27;))+tickNumber(frequency)+&#x27; Hz&#x27;);
-    role(&#x27;wave-view&#x27;).textContent=post&amp;&amp;role(&#x27;late-view&#x27;).checked?t(&#x27;旋近 → 过渡 → 铃宕 · 连续末段&#x27;,&#x27;Inspiral → Transition → Ringdown&#x27;):t(&#x27;最近 8 T₀&#x27;,&#x27;Last 8 T₀&#x27;);
+    role(&#x27;wave-view&#x27;).textContent=linkedWaveBounds()!==gw.viewBounds?t(&#x27;时频选区&#x27;,&#x27;Spectrogram selection&#x27;):
+      post&amp;&amp;role(&#x27;late-view&#x27;).checked?t(&#x27;旋近 → 过渡 → 铃宕 · 连续末段&#x27;,&#x27;Inspiral → Transition → Ringdown&#x27;):t(&#x27;最近 8 T₀&#x27;,&#x27;Last 8 T₀&#x27;);
     if(role(&#x27;gw-status&#x27;).textContent!==status)role(&#x27;gw-status&#x27;).textContent=status;
   }
   function persist() {
@@ -3639,6 +4250,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   }
   function reset(keepView=false) {
     running=false;post=null;model=makeModel(p);state=initial(p);time=0;stopped=stopReason(state,model);
+    comparison=null;
     radialHistory=window.OrbitEccentricity.track();
     if(!stopped)radialHistory.sample(0,state);
     role(&#x27;spectrum-before&#x27;).checked=false;
@@ -3721,10 +4333,42 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   }
   function bodyGeometry() {
     const fA=p.m2/(p.m1+p.m2),fB=-p.m1/(p.m1+p.m2);
-    let rx=state[0],ry=state[1];
-    if(post){const z=clamp((time-post.start)/post.bridge,0,1),r=Math.hypot(...post.state.slice(0,2))*(1-3*z*z+2*z*z*z),angle=post.angle+(RD.valueAt(post,time).phase-post.phase0)/2;rx=r*Math.cos(angle);ry=r*Math.sin(angle);}
+    const [rx,ry]=post?tailPosition(time):state;
     const A=xy(rx*fA,ry*fA),B=xy(rx*fB,ry*fB);
     return {fA,fB,A,B,tipA:[A[0]+state[2]*fA*velocityScale,A[1]-state[3]*fA*velocityScale],tipB:[B[0]+state[2]*fB*velocityScale,B[1]-state[3]*fB*velocityScale]};
+  }
+  function tailPosition(at){
+    const z=clamp((at-post.start)/post.bridge,0,1);
+    const radius=Math.hypot(post.state[0],post.state[1])*(1-3*z*z+2*z*z*z);
+    const angle=post.angle+(RD.valueAt(post,at).phase-post.phase0)/2;
+    return [radius*Math.cos(angle),radius*Math.sin(angle)];
+  }
+  function drawLinkedOrbit({fA,fB}){
+    const locator=gw.locator,selected=Boolean(locator);
+    const view=role(&#x27;linked-orbit&#x27;),orbitNote=role(&#x27;linked-orbit-note&#x27;),timeNote=role(&#x27;linked-time&#x27;);
+    view.toggleAttribute(&#x27;hidden&#x27;,!selected);orbitNote.hidden=timeNote.hidden=!selected;
+    $(&#x27;[data-action=&quot;clear-link&quot;]&#x27;).hidden=!selected;
+    if(!selected){delete view.dataset.time;return;}
+    const {sample,peri}=locator;
+    const inTail=sample.segment===&#x27;tail&#x27;&amp;&amp;post;
+    const isRemnant=inTail&amp;&amp;sample.t&gt;=post.start+post.bridge;
+    const [rx,ry]=inTail?tailPosition(sample.t):[sample.orbitX,sample.orbitY];
+    const finite=Number.isFinite(rx)&amp;&amp;Number.isFinite(ry);
+    view.toggleAttribute(&#x27;hidden&#x27;,!finite);
+    if(finite){
+      const [ax,ay]=xy(rx*fA,ry*fA),[bx,by]=xy(rx*fB,ry*fB);
+      attr(role(&#x27;linked-A&#x27;),{cx:ax,cy:ay});attr(role(&#x27;linked-B&#x27;),{cx:bx,cy:by});
+      attr(role(&#x27;linked-connector&#x27;),{x1:ax,y1:ay,x2:bx,y2:by});
+      role(&#x27;linked-B&#x27;).toggleAttribute(&#x27;hidden&#x27;,Boolean(isRemnant));
+      role(&#x27;linked-connector&#x27;).toggleAttribute(&#x27;hidden&#x27;,Boolean(isRemnant));
+    }
+    view.dataset.time=String(sample.t*model.tunit);
+    const at=t(&#x27;定位 t = &#x27;,&#x27;Selected t = &#x27;)+fixed(sample.t*model.tunit,4)+&#x27; s&#x27;;
+    const periNote=peri===null?&#x27;&#x27;:t(&#x27; · 相对最近近心点 Δt = &#x27;,&#x27; · Offset from closest pericenter Δt = &#x27;)+fixed((sample.t-peri)*model.tunit,4)+&#x27; s&#x27;;
+    const phase=isRemnant?t(&#x27; · 铃宕&#x27;,&#x27; · Ringdown&#x27;):inTail?t(&#x27; · 示意并合&#x27;,&#x27; · Illustrative merger&#x27;):
+      finite?t(&#x27; · 间距 &#x27;,&#x27; · Separation &#x27;)+fmt(Math.hypot(rx,ry)*model.length,1)+&#x27; km&#x27;:&#x27;&#x27;;
+    if(timeNote.textContent!==at+periNote)timeNote.textContent=at+periNote;
+    if(orbitNote.textContent!==at+phase)orbitNote.textContent=at+phase;
   }
   function draw() {
     const mfrac=Math.max(p.m1,p.m2)/(p.m1+p.m2),r=Math.hypot(state[0],state[1]);
@@ -3760,6 +4404,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     }
     role(&#x27;orbitnote&#x27;).textContent=post?t(&#x27;末段慢放 · 天体形状与并合过程为示意&#x27;,&#x27;Slow playback · Shapes and merger are illustrative&#x27;):
       t(&#x27;拖动星体 / 空心速度端点&#x27;,&#x27;Drag bodies or hollow velocity tips&#x27;);
+    drawLinkedOrbit(g);
     const raw=model.length/scale*Math.min(110,w/4),pow=10**Math.floor(Math.log10(raw));
     const bar=[1,2,5].map(x=&gt;x*pow).filter(x=&gt;x&lt;=raw).pop()||pow/2,px=bar/model.length*scale;
     role(&#x27;scaleline&#x27;).setAttribute(&#x27;d&#x27;,&#x27;M14,&#x27;+(h-19)+&#x27;v5h&#x27;+px+&#x27;v-5&#x27;);attr(role(&#x27;scalelabel&#x27;),{x:14,y:h-26});role(&#x27;scalelabel&#x27;).textContent=fmt(bar,1)+&#x27; km&#x27;;
@@ -3806,13 +4451,38 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     p={...preset,pn:p.pn,nearMerger:useTail||p.nearMerger,ringdown:useTail||p.ringdown};
     reset();persist();
   });
-  play.addEventListener(&#x27;click&#x27;,()=&gt;{running=!running;last=performance.now();draw();});
+  play.addEventListener(&#x27;click&#x27;,()=&gt;{clearLink();running=!running;last=performance.now();draw();});
   $(&#x27;[data-action=&quot;restart&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;reset());
-  $(&#x27;[data-action=&quot;step&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{running=false;advance(post?post.tau/8:TAU/100);draw();});
-  $(&#x27;[data-action=&quot;replay-tail&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{if(!post)return;time=post.start;stopped=null;gw.samples=gw.samples.filter(s=&gt;s.t&lt;=time);gw.columns=gw.columns.filter(c=&gt;c.segment!==&#x27;tail&#x27;);prepareTailSampling();running=true;last=performance.now();chartDirty=true;draw();});
+  $(&#x27;[data-action=&quot;step&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{clearLink();running=false;advance(post?post.tau/8:TAU/100);draw();});
+  $(&#x27;[data-action=&quot;replay-tail&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{if(!post)return;clearLink();time=post.start;stopped=null;gw.samples=gw.samples.filter(s=&gt;s.t&lt;=time);gw.columns=gw.columns.filter(c=&gt;c.segment!==&#x27;tail&#x27;);prepareTailSampling();running=true;last=performance.now();chartDirty=true;draw();});
   role(&#x27;late-view&#x27;).checked=window.orbitalToy?.privateContent?.ringdownZoom!==false;
-  role(&#x27;late-view&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{transitionWaveView();drawGW(true);window.orbitalToy?.save({}, {ringdownZoom:role(&#x27;late-view&#x27;).checked});});
-  role(&#x27;spectrum-before&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;drawGW(true));
+  role(&#x27;late-view&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{clearLink();transitionWaveView();draw();drawGW(true);window.orbitalToy?.save({}, {ringdownZoom:role(&#x27;late-view&#x27;).checked});});
+  role(&#x27;spectrum-before&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{clearLink();draw();drawGW(true);});
+  $(&#x27;[data-action=&quot;clear-link&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{clearLink();draw();role(&#x27;spectrogram&#x27;).focus();});
+  $(&#x27;[data-action=&quot;compare-current&quot;]&#x27;).addEventListener(&#x27;click&#x27;,startComparison);
+  $(&#x27;[data-action=&quot;compare-example&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{
+    setPreset(&#x27;eccentric-inspiral&#x27;);p={...presets[&#x27;eccentric-inspiral&#x27;],pn:0};reset();persist();startComparison();
+  });
+  role(&#x27;comparison&#x27;).addEventListener(&#x27;toggle&#x27;,()=&gt;{if(!root.hidden)drawEccentricity();});
+  role(&#x27;spectrogram&#x27;).addEventListener(&#x27;click&#x27;,event=&gt;{
+    const plot=gw.spectrumPlot;if(!plot?.plotBox)return;
+    const rect=event.currentTarget.getBoundingClientRect();
+    const px=event.clientX-rect.left,py=event.clientY-rect.top;
+    const {x,y,width,height}=plot.plotBox;
+    if(px&lt;x||px&gt;x+width||py&lt;y||py&gt;y+height||plot.canPick&amp;&amp;!plot.canPick(px,py))return;
+    locateWave(plot.bounds.start+(px-x)/width*(plot.bounds.end-plot.bounds.start),plot.bounds);
+  });
+  role(&#x27;spectrogram&#x27;).addEventListener(&#x27;keydown&#x27;,event=&gt;{
+    const plot=gw.spectrumPlot;
+    if(event.key===&#x27;Escape&#x27;&amp;&amp;gw.locator){event.preventDefault();clearLink();draw();return;}
+    if(!plot?.bounds||![&#x27;ArrowLeft&#x27;,&#x27;ArrowRight&#x27;].includes(event.key)||gw.samples.length&lt;2)return;
+    event.preventDefault();
+    const {start,end}=plot.bounds;
+    const lo=Math.max(start,gw.samples[0].t),hi=Math.min(end,gw.samples.at(-1).t);
+    if(hi&lt;=lo)return;
+    const increment=(hi-lo)/40*(event.key===&#x27;ArrowLeft&#x27;?-1:1);
+    locateWave(clamp((gw.locator?.sample.t??(lo+hi)/2)+increment,lo,hi),plot.bounds);
+  });
   function pointer(event) {const box=svg.getBoundingClientRect();return [(event.clientX-box.left)*w/box.width,(event.clientY-box.top)*h/box.height];}
   function adoptCurrent() {
     const o=orbit(state),angle=Math.atan2(state[1],state[0]),vc=PN.circularSpeed(model,o.r);
@@ -3849,6 +4519,10 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     if(!root.isConnected) {cancelAnimationFrame(raf);observer.disconnect();themeObserver.disconnect();appearance.removeEventListener(&#x27;change&#x27;,onTheme);window.removeEventListener(&#x27;openai:set_globals&#x27;,restore);return;}
     const dt=Math.min(0.05,Math.max(0,(now-last)/1000));last=now;
     if(running&amp;&amp;!document.hidden&amp;&amp;!root.hidden) advance(dt*p.speed*(post?(post.end-post.start)/5:TAU));
+    if(comparison&amp;&amp;!comparison.done&amp;&amp;!document.hidden&amp;&amp;!root.hidden){
+      comparison.advance(600);
+      if(comparison.done||now-gw.lastDraw&gt;=120){gw.dirty=true;drawGW(comparison.done);}
+    }
     if(chartDirty) draw();if(gw.viewTween){gw.dirty=true;drawGW();}raf=requestAnimationFrame(frame);
   }
   const observer=new ResizeObserver(entries=&gt;{
@@ -3942,6 +4616,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       &lt;div class=&quot;be-plot-heading&quot;&gt;&lt;h3&gt;总引力波 · 时域&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;三体四极矩 · 相对振幅&lt;/span&gt;&lt;/div&gt;
       &lt;canvas class=&quot;be-wave-chart&quot; data-role=&quot;waveform&quot; role=&quot;img&quot; aria-label=&quot;三体总四极矩波形，正面观测，纵轴为相对参考圆轨道的振幅。&quot;&gt;总 h₊ 与 h× 波形。&lt;/canvas&gt;
       &lt;div class=&quot;be-wave-legend text-small&quot;&gt;&lt;button type=&quot;button&quot; class=&quot;be-series-toggle cursor-interaction&quot; data-series=&quot;plus&quot; aria-pressed=&quot;true&quot;&gt;&lt;i class=&quot;be-swatch&quot; style=&quot;background:var(--viz-series-1)&quot;&gt;&lt;/i&gt;h₊ 实线&lt;/button&gt;&lt;button type=&quot;button&quot; class=&quot;be-series-toggle cursor-interaction&quot; data-series=&quot;cross&quot; aria-pressed=&quot;true&quot;&gt;&lt;i class=&quot;be-swatch&quot; style=&quot;background:var(--viz-series-2)&quot;&gt;&lt;/i&gt;h× 虚线&lt;/button&gt;&lt;span class=&quot;text-muted&quot;&gt;最近 8 T₀&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-role=&quot;frequency-domain&quot;&gt;&lt;/div&gt;
       &lt;div class=&quot;be-plot-heading&quot;&gt;&lt;h3&gt;总引力波 · 时频&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot; data-role=&quot;spectrum-method&quot;&gt;h₊ · STFT&lt;/span&gt;&lt;/div&gt;
       &lt;div class=&quot;spectrum-view&quot;&gt;&lt;label class=&quot;form-check&quot;&gt;&lt;input class=&quot;form-check-input&quot; type=&quot;checkbox&quot; data-role=&quot;spectrum-track&quot; checked&gt;&lt;span class=&quot;form-check-label text-small&quot;&gt;A、B 轨道频率参考&lt;/span&gt;&lt;/label&gt;&lt;/div&gt;
       &lt;canvas class=&quot;spectrum-chart&quot; data-role=&quot;spectrogram&quot; role=&quot;img&quot; aria-describedby=&quot;em-spectrum-note&quot; aria-label=&quot;三体总 h加波形的时频图，颜色表示相对功率。&quot;&gt;总波形时频图。&lt;/canvas&gt;
@@ -4115,6 +4790,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   const canvas=role(&#x27;orbit&#x27;),play=$(&#x27;[data-action=&quot;play&quot;]&#x27;),fmt=(v,n=2)=&gt;Number(v).toLocaleString(t(&#x27;zh-CN&#x27;,&#x27;en-US&#x27;),{maximumFractionDigits:n});
   const gw={samples:[],buffer:[],columns:[],dt:1,next:1,hop:0,size:512,visible:{plus:true,cross:true},dirty:true,lastDraw:0,colors:null,hover:null};
   const spectral=SP.attach(root,&#x27;emriSpectrum&#x27;,rebuild=&gt;{if(rebuild)rebuildSpectrum();gw.dirty=true;if(!root.hidden)drawGW(true);});
+  const fourier=window.OrbitFourier.attach(root);
   const spectrumGuides=[
     {key:&#x27;frequencyA&#x27;,get label(){return t(&#x27;A · 2f 轨道&#x27;,&#x27;A · 2f orbit&#x27;);}},
     {key:&#x27;frequencyB&#x27;,get label(){return t(&#x27;B · 2f 轨道&#x27;,&#x27;B · 2f orbit&#x27;);},color:&#x27;#ffd49f&#x27;,dash:[2,4]}
@@ -4132,6 +4808,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     gw.dirty=true;
   }
   function resetWave() {
+    fourier.clear();
     spectral.clearCache();SP.resetUniformStft(gw);
     gw.size=spectral.size();
     gw.samples=[];gw.dt=GW_INITIAL_DT;gw.next=gw.dt;
@@ -4209,12 +4886,13 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   }
   function drawGW(force=false) {
     const now=performance.now();if(!gw.dirty&amp;&amp;!force)return;if(!force&amp;&amp;now-gw.lastDraw&lt;80)return;
-    const end=Math.max(GW_VIEW,time);
+    const end=Math.max(GW_VIEW,time),bounds={start:end-GW_VIEW,end};
     const fa=doubledOrbitalFrequency(1)/model.tunit,fb=doubledOrbitalFrequency(2)/model.tunit;
     const slowPeriod=TAU*Math.max(Math.sqrt(p.rA**3/(1+model.masses[1])),Math.sqrt(p.rB**3/(1+model.masses[2])));
     drawWaveform();
+    fourier.render({samples:gw.samples,bounds,tunit:model.tunit,colors:gwColors(),running,frequencyUnit:&#x27;mHz&#x27;,timeUnit:&#x27;h&#x27;});
     const result=spectral.render({
-      state:gw,bounds:{start:end-GW_VIEW,end},colors:gwColors(),tunit:model.tunit,
+      state:gw,bounds,colors:gwColors(),tunit:model.tunit,
       frequencyUnit:&#x27;mHz&#x27;,timeUnit:&#x27;h&#x27;,frequencyFloor:0.5/(slowPeriod*model.tunit),
       frequencyCeiling:Math.max(4/(model.period*model.tunit),1.2*Math.max(fa,fb)),guides:spectrumGuides,
       emptyLabel:time===0?t(&#x27;等待波形采样&#x27;,&#x27;Waiting for waveform samples&#x27;):undefined
@@ -4376,6 +5054,7 @@ window.orbitalToy?.show(window.orbitalToy.mode);
       &lt;h3&gt;引力波 · 时域&lt;/h3&gt;&lt;div class=&quot;text-small text-muted&quot;&gt;轨迹四极矩近似 · 正面观测 · 非强场精确波形&lt;/div&gt;
       &lt;canvas class=&quot;sg-wave&quot; data-role=&quot;waveform&quot; role=&quot;img&quot; aria-label=&quot;坐标轨迹的四极矩示意波形，h加实线、h叉虚线，时间单位小时。&quot;&gt;h₊ 实线、h× 虚线。&lt;/canvas&gt;
       &lt;div class=&quot;sg-legend text-small&quot;&gt;&lt;span&gt;h₊ 实线&lt;/span&gt;&lt;span&gt;h× 虚线&lt;/span&gt;&lt;span class=&quot;text-muted&quot;&gt;相对振幅 · 最近 8 T₀&lt;/span&gt;&lt;/div&gt;
+      &lt;div data-role=&quot;frequency-domain&quot;&gt;&lt;/div&gt;
       &lt;div class=&quot;be-plot-heading&quot;&gt;&lt;h3&gt;引力波 · 时频&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot; data-role=&quot;spectrum-method&quot;&gt;h₊ · STFT&lt;/span&gt;&lt;/div&gt;
       &lt;div class=&quot;spectrum-view&quot;&gt;&lt;label class=&quot;form-check&quot;&gt;&lt;input class=&quot;form-check-input&quot; type=&quot;checkbox&quot; data-role=&quot;spectrum-track&quot; checked&gt;&lt;span class=&quot;form-check-label text-small&quot;&gt;方位频率参考 2fφ&lt;/span&gt;&lt;/label&gt;&lt;/div&gt;
       &lt;canvas class=&quot;spectrum-chart&quot; data-role=&quot;spectrogram&quot; role=&quot;img&quot; aria-describedby=&quot;sg-spectrum-note&quot; aria-label=&quot;四极矩示意波形 h加的时频图，频率单位毫赫兹。&quot;&gt;时频图。&lt;/canvas&gt;
@@ -4479,6 +5158,7 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   let p=clean(window.orbitalToy?.modelContent?.geodesicParameters),m,state,time=0,running=false,last=performance.now(),dirty=true,lastDraw=0,trail=[],drag=null,geometry=null;
   const gw={samples:[],buffer:[],columns:[],dt:1,next:1,hop:0,size:512};
   const spectral=SP.attach(root,&#x27;geodesicSpectrum&#x27;,rebuild=&gt;{if(rebuild)rebuildSpectrum();dirty=true;draw();});
+  const fourier=window.OrbitFourier.attach(root);
   let colorCache=null;
   function colors(){if(colorCache)return colorCache;const probe=document.createElement(&#x27;span&#x27;);root.append(probe);const read=name=&gt;{probe.style.color=&#x27;var(&#x27;+name+&#x27;)&#x27;;return getComputedStyle(probe).color;};colorCache={fg:read(&#x27;--foreground&#x27;),bg:read(&#x27;--background&#x27;),muted:read(&#x27;--muted-foreground&#x27;),border:read(&#x27;--border&#x27;),plus:read(&#x27;--viz-series-1&#x27;),cross:read(&#x27;--viz-series-2&#x27;)};probe.remove();return colorCache;}
   function canvas(name,height,right=18){const el=role(name),width=Math.max(250,el.getBoundingClientRect().width),dpr=Math.min(devicePixelRatio||1,2);el.style.height=height+&#x27;px&#x27;;if(el.width!==Math.round(width*dpr)||el.height!==Math.round(height*dpr)){el.width=Math.round(width*dpr);el.height=Math.round(height*dpr);}const ctx=el.getContext(&#x27;2d&#x27;);ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,width,height);ctx.font=getComputedStyle(root).font;const box={x:62,y:25,width:width-62-right,height:height-62},end=Math.max(8*(m.period||1),time),start=Math.max(0,end-8*(m.period||1));return {canvas:el,ctx,box,width,height,colors:colors(),start,end,x:t=&gt;box.x+(t-start)/(end-start)*box.width};}
@@ -4539,10 +5219,11 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   function advance(duration){if(!m.valid)return;const end=time+duration;let n=0;while(time&lt;end-1e-9&amp;&amp;n++&lt;5000){const q=GR.point(state,m),dc=GR.rates(state[0],m.p,m.e)[0],dt=Math.min(end-time,gw.next-time,0.012/Math.max(dc,q.omega));state=GR.step(state,dt,m);time+=dt;if(time&gt;=gw.next-1e-8){sample();gw.next+=gw.dt;}const next=GR.point(state,m);trail.push([next.x,next.y]);}if(trail.length&gt;5000)trail.splice(0,trail.length-5000);SP.trimHistory(gw,keepWaveAfter());dirty=true;}
   function drawOrbit(){const plot=canvas(&#x27;orbit&#x27;,root.getBoundingClientRect().width&gt;=760?440:340),{ctx,width,height,colors:co}=plot;ctx.strokeStyle=co.border;ctx.strokeRect(0.5,0.5,width-1,height-1);ctx.fillStyle=co.muted;ctx.textAlign=&#x27;left&#x27;;ctx.fillText(t(&#x27;拖动小天体 · 坐标轨道投影&#x27;,&#x27;Drag the small body · Coordinate projection&#x27;),12,22);if(!m.valid){geometry=null;return;}const q=GR.point(state,m),scale=Math.min(width-40,height-60)/(2*m.ra*1.08),cx=width/2,cy=height/2+8;const xy=(x,y)=&gt;[cx+x*scale,cy-y*scale];ctx.setLineDash([4,5]);ctx.strokeStyle=co.border;for(const r of [m.rp,m.ra]){ctx.beginPath();ctx.arc(cx,cy,r*scale,0,TAU);ctx.stroke();}ctx.setLineDash([]);ctx.fillStyle=co.bg;ctx.strokeStyle=co.muted;ctx.beginPath();ctx.arc(cx,cy,2*scale,0,TAU);ctx.fill();ctx.stroke();ctx.strokeStyle=co.plus;ctx.lineWidth=1.6;ctx.beginPath();trail.forEach((v,i)=&gt;{const a=xy(...v);i?ctx.lineTo(...a):ctx.moveTo(...a);});ctx.stroke();const pos=xy(q.x,q.y);ctx.fillStyle=co.plus;ctx.beginPath();ctx.arc(...pos,7,0,TAU);ctx.fill();ctx.lineWidth=1;ctx.fillStyle=co.muted;ctx.textAlign=&#x27;left&#x27;;ctx.fillText(&#x27;rₚ = &#x27;+fmt(m.rp,2)+&#x27; / rₐ = &#x27;+fmt(m.ra,2)+&#x27; r_g&#x27;,12,height-12);geometry={...plot,pos,cx,cy,scale};plot.canvas.dataset.radius=String(q.r);plot.canvas.dataset.phi=String(state[1]);plot.canvas.dataset.chi=String(state[0]);}
   function drawWaves(){const wave=canvas(&#x27;waveform&#x27;,200),{ctx,box,colors:co,x,start}=wave;const samples=gw.samples.filter(s=&gt;s.t&gt;=start-gw.dt);let peak=0.1;for(const s of samples)peak=Math.max(peak,Math.abs(s.plus),Math.abs(s.cross));const ylim=Math.ceil(peak*1.15*4)/4,y=v=&gt;box.y+box.height*(0.5-v/(2*ylim));axes(wave,-ylim,ylim,&#x27;h / h₀&#x27;);ctx.save();ctx.beginPath();ctx.rect(box.x,box.y,box.width,box.height);ctx.clip();for(const key of [&#x27;plus&#x27;,&#x27;cross&#x27;]){ctx.strokeStyle=co[key];ctx.setLineDash(key===&#x27;cross&#x27;?[5,3]:[]);ctx.beginPath();samples.forEach((s,i)=&gt;{i?ctx.lineTo(x(s.t),y(s[key])):ctx.moveTo(x(s.t),y(s[key]));});ctx.stroke();}ctx.restore();wave.canvas.dataset.samples=String(samples.length);
-    const period=m.valid?m.period:1,end=Math.max(8*period,time);
+    const period=m.valid?m.period:1,end=Math.max(8*period,time),bounds={start:end-8*period,end};
+    fourier.render({samples:gw.samples,bounds,tunit:m.tunit,colors:co,running,frequencyUnit:&#x27;mHz&#x27;,timeUnit:&#x27;h&#x27;});
     const base=m.valid?1/(period*m.tunit):0.001;
     const result=spectral.render({
-      state:gw,bounds:{start:end-8*period,end},colors:{...co,font:getComputedStyle(root).font},tunit:m.tunit,
+      state:gw,bounds,colors:{...co,font:getComputedStyle(root).font},tunit:m.tunit,
       frequencyUnit:&#x27;mHz&#x27;,timeUnit:&#x27;h&#x27;,frequencyFloor:base/2,
       frequencyCeiling:m.valid?Math.max(4*base,1.2*m.maxOmega/(Math.PI*m.tunit)):4*base,
       guides:[{key:&#x27;frequency&#x27;,label:t(&#x27;方位参考 2fφ&#x27;,&#x27;Azimuthal reference 2fφ&#x27;)}],
@@ -4733,6 +5414,27 @@ html &gt; body {
 .be-eccentricity { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--orbit-line); }
 .be-eccentricity-chart { display: block; width: 100%; height: 184px; }
 .be-eccentricity p { margin: 4px 0 0; }
+.frequency-domain-panel { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--orbit-line); }
+.frequency-domain-chart { display: block; width: 100%; height: 248px; }
+.frequency-domain-controls { align-items: center; }
+.be-linked-orbit { pointer-events: none; }
+.be-linked-spectrum { cursor: crosshair; }
+.be-linked-spectrum:focus-visible { outline: 2px solid var(--orbit-action); outline-offset: 3px; }
+.be-linked-readout { display: block; color: var(--orbit-secondary); margin: 6px 0; }
+.be-spectrogram-link, .be-comparison-actions, .be-comparison-legend {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px;
+}
+.be-spectrogram-link { margin: 6px 0; }
+.be-comparison { margin-top: 12px; padding: 8px 12px; border: 1px solid var(--orbit-line); border-radius: 10px; }
+.be-comparison summary { margin-top: 0 !important; cursor: pointer; font-weight: 600; }
+.be-comparison-actions, .be-comparison-legend, .be-comparison-readouts { margin: 8px 0; }
+.be-comparison-legend i { display: inline-block; width: 16px; margin-right: 5px; vertical-align: middle; border-top: 2px solid; }
+.be-comparison-legend .be-comparison-current { color: var(--viz-series-1); }
+.be-comparison-legend .be-comparison-off { color: var(--muted-foreground); border-top-style: dashed; }
+.be-comparison-legend .be-comparison-on { color: var(--viz-series-2); }
+.be-comparison-legend .be-comparison-peters { color: #508879; border-top-style: dotted; }
+.be-comparison-readouts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+.be-comparison-readouts &gt; div { display: grid; padding: 6px 8px; border-radius: 8px; background: var(--orbit-soft); }
 :is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-wave-panel, .em-waves) &gt; .be-plot-heading:not(:first-child),
 #schwarzschild-sandbox .sg-stage &gt; section:nth-child(2) &gt; .be-plot-heading {
   margin-top: 18px;
