@@ -4576,6 +4576,7 @@ window.orbitalToy?.show(window.orbitalToy.mode);
 &lt;footer class=&quot;orbit-footer&quot; aria-labelledby=&quot;orbit-model-note&quot;&gt;
   &lt;strong id=&quot;orbit-model-note&quot; data-en=&quot;About the model&quot;&gt;模型说明&lt;/strong&gt;
   &lt;p data-en=&quot;This educational toy model uses planar orbits and initially nonspinning bodies. The binary and three-body modes use Newtonian gravity with optional finite-order post-Newtonian corrections. The Schwarzschild mode follows a test particle in a fixed spacetime. The waveforms and merger animation are illustrative. Full numerical relativity lies outside the scope of the model.&quot;&gt;这是一个教学用的玩具模型，采用二维平面轨道，初始天体无自旋。双星和三体以牛顿引力为基础，可选有限阶后牛顿近似。Schwarzschild 模式计算固定时空中的试验粒子测地线。波形与并合动画用于定性演示，完整的数值相对论演化超出本模型范围。&lt;/p&gt;
+  &lt;p class=&quot;orbit-repository&quot;&gt;&lt;span data-en=&quot;GitHub repository&quot;&gt;GitHub 仓库&lt;/span&gt; &lt;a href=&quot;https://github.com/suhongqwq/gw-orbit-lab&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;github.com/suhongqwq/gw-orbit-lab&lt;/a&gt;&lt;/p&gt;
 &lt;/footer&gt;
 &lt;script&gt;
   window.OrbitLocale.localize(document.querySelector(&#x27;.orbit-footer&#x27;));
@@ -4630,6 +4631,8 @@ html &gt; body {
 }
 .orbit-footer strong { color: var(--foreground); font-weight: 600; }
 .orbit-footer p { max-width: 76ch; margin: 4px 0 0; }
+.orbit-footer .orbit-repository { margin-top: 8px; }
+.orbit-repository a { color: var(--orbit-action); overflow-wrap: anywhere; text-underline-offset: 0.15em; }
 #orbital-modes {
   grid-area: modes;
   display: flex;
