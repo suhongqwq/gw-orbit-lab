@@ -1890,7 +1890,7 @@ html&gt;body{padding:0}&lt;/style&gt;
 })();
 &lt;/script&gt;
 &lt;script&gt;
-window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨道实验室&quot;, &quot;en&quot;: &quot;GW Orbit Lab&quot;}, &quot;version&quot;: &quot;v1.0&quot;};
+window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨道实验室&quot;, &quot;en&quot;: &quot;GW Orbit Lab&quot;}, &quot;version&quot;: &quot;v1.1&quot;};
 /* Translate authored text in place, keeping controls and the simulation alive. */
 (() =&gt; {
   const attributes = [&#x27;aria-label&#x27;, &#x27;title&#x27;, &#x27;placeholder&#x27;, &#x27;label&#x27;];
@@ -3055,6 +3055,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
         &lt;option value=&quot;gw190521&quot;&gt;GW190521 · 85 + 66 M☉&lt;/option&gt;
         &lt;option value=&quot;gw231123&quot;&gt;GW231123 · 137 + 103 M☉&lt;/option&gt;
       &lt;/optgroup&gt;
+      &lt;option value=&quot;emri-geodesic&quot;&gt;典型 EMRI · 打开测地线模式&lt;/option&gt;
       &lt;option value=&quot;custom&quot;&gt;自定义初始条件&lt;/option&gt;
     &lt;/select&gt;&lt;/label&gt;
   &lt;/div&gt;
@@ -3170,6 +3171,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     &#x27;相对论进动 · 无耗散&#x27;:&#x27;Relativistic precession · No dissipation&#x27;,
     &#x27;双曲线掠过 · 无耗散&#x27;:&#x27;Hyperbolic flyby · No dissipation&#x27;,
     &#x27;引力波事件 · 源系质量演示&#x27;:&#x27;Gravitational-wave events · Source-frame masses&#x27;,
+    &#x27;典型 EMRI · 打开测地线模式&#x27;:&#x27;Typical EMRI · Open geodesic mode&#x27;,
     &#x27;自定义初始条件&#x27;:&#x27;Custom initial conditions&#x27;,
     &#x27;观测来源&#x27;:&#x27;Observation source&#x27;,
     &#x27;双星运动与当前状态&#x27;:&#x27;Binary motion and current state&#x27;,
@@ -3253,6 +3255,9 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   });
   const $ = s =&gt; root.querySelector(s);
   const role = name =&gt; $(&#x27;[data-role=&quot;&#x27; + name + &#x27;&quot;]&#x27;);
+  const presetControl=role(&#x27;preset&#x27;);
+  let selectedPreset=presetControl.value;
+  function setPreset(key){presetControl.value=key;selectedPreset=key;}
   const out = (name, value) =&gt; { $(&#x27;[data-value=&quot;&#x27; + name + &#x27;&quot;]&#x27;).textContent = value;if(name===&#x27;speed&#x27;)$(&#x27;#be-speed&#x27;).setAttribute(&#x27;aria-valuetext&#x27;,value); };
   const TAU = 2 * Math.PI, GM_SUN = 1.32712440018e11, C = 299792.458;
   const clamp = (x, lo, hi) =&gt; Math.min(hi, Math.max(lo, x));
@@ -3775,7 +3780,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     if(!Number.isFinite(value)) {syncControls();return;}
     const bounds=limits[key];p[key]=clamp(value,bounds[0],bounds[1]);
     if(key===&#x27;speed&#x27;) syncControls();
-    else {role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();}
+    else {setPreset(&#x27;custom&#x27;);reset();}
   }
   root.querySelectorAll(&#x27;[data-key]&#x27;).forEach(el=&gt;{
     el.addEventListener(&#x27;input&#x27;,()=&gt;{
@@ -3785,10 +3790,17 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     el.addEventListener(&#x27;change&#x27;,persist);
   });
   root.querySelectorAll(&#x27;[data-number]&#x27;).forEach(el=&gt;el.addEventListener(&#x27;change&#x27;,()=&gt;{edit(el.dataset.number,el.value.trim()===&#x27;&#x27;?NaN:Number(el.value));persist();}));
-  for(const key of [&#x27;radiation&#x27;,&#x27;nearMerger&#x27;,&#x27;ringdown&#x27;])role(key).addEventListener(&#x27;change&#x27;,()=&gt;{p[key]=role(key).checked;role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();persist();});
+  for(const key of [&#x27;radiation&#x27;,&#x27;nearMerger&#x27;,&#x27;ringdown&#x27;])role(key).addEventListener(&#x27;change&#x27;,()=&gt;{p[key]=role(key).checked;setPreset(&#x27;custom&#x27;);reset();persist();});
   role(&#x27;pn&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{p.pn=Number(role(&#x27;pn&#x27;).value);reset();persist();});
-  role(&#x27;preset&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{
-    const key=role(&#x27;preset&#x27;).value,preset=presets[key];
+  presetControl.addEventListener(&#x27;change&#x27;,()=&gt;{
+    const key=presetControl.value;
+    if(key===&#x27;emri-geodesic&#x27;){
+      setPreset(selectedPreset);
+      window.orbitalToy.openGeodesicPreset(&#x27;emri&#x27;);
+      return;
+    }
+    setPreset(key);
+    const preset=presets[key];
     if(!preset){syncControls();return;}
     const useTail=key===&#x27;ringdown&#x27;||!!gwEvents[key];
     p={...preset,pn:p.pn,nearMerger:useTail||p.nearMerger,ringdown:useTail||p.ringdown};
@@ -3829,7 +3841,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     p.separation=newLength;p.angle=(angle*180/Math.PI+360)%360;
     p.vr=clamp((vx*Math.cos(angle)+vy*Math.sin(angle))*oldV/vc,-2,2);
     p.vt=clamp((-vx*Math.sin(angle)+vy*Math.cos(angle))*oldV/vc,-2,2);
-    role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;extent=drag.extent*drag.model.length/newLength;velocityScale=drag.velocityScale*newModel.vunit/oldV;reset(true);
+    setPreset(&#x27;custom&#x27;);extent=drag.extent*drag.model.length/newLength;velocityScale=drag.velocityScale*newModel.vunit/oldV;reset(true);
   });
   function endDrag(event) {if(!drag)return;drag=null;if(svg.hasPointerCapture(event.pointerId))svg.releasePointerCapture(event.pointerId);chartDirty=true;persist();}
   svg.addEventListener(&#x27;pointerup&#x27;,endDrag);svg.addEventListener(&#x27;pointercancel&#x27;,endDrag);
@@ -3857,7 +3869,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     if(!saved?.modelContent?.parameters)return;
     const restored=clean(saved.modelContent.parameters);
     if(Object.keys(defaults).every(key=&gt;restored[key]===p[key]))return;
-    p=restored;role(&#x27;preset&#x27;).value=saved.privateContent?.preset in presets?saved.privateContent.preset:&#x27;custom&#x27;;reset();
+    p=restored;setPreset(Object.hasOwn(presets,saved.privateContent?.preset)?saved.privateContent.preset:&#x27;custom&#x27;);reset();
   }
   window.addEventListener(&#x27;openai:set_globals&#x27;,restore);
   document.addEventListener(&#x27;orbital-mode&#x27;,()=&gt;{running=false;last=performance.now();setStatus();if(!root.hidden){chartDirty=true;gw.dirty=true;draw();}});
@@ -3866,9 +3878,9 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     gw.dirty=true;
     if(!root.hidden){draw();if(gw.dirty)drawGW(true);}
   });
-  if(window.openai?.widgetState?.modelContent?.parameters) role(&#x27;preset&#x27;).value=window.openai.widgetState.privateContent?.preset in presets?window.openai.widgetState.privateContent.preset:&#x27;custom&#x27;;
+  if(window.openai?.widgetState?.modelContent?.parameters) setPreset(Object.hasOwn(presets,window.openai.widgetState.privateContent?.preset)?window.openai.widgetState.privateContent.preset:&#x27;custom&#x27;);
   reset();observer.observe(root);raf=requestAnimationFrame(frame);
-  window.OrbitFavorites.attach({root,mode:&#x27;binary&#x27;,read:()=&gt;({...p}),load:values=&gt;{p=clean(values);role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();persist();},describe:values=&gt;{
+  window.OrbitFavorites.attach({root,mode:&#x27;binary&#x27;,read:()=&gt;({...p}),load:values=&gt;{p=clean(values);setPreset(&#x27;custom&#x27;);reset();persist();},describe:values=&gt;{
     const q=clean(values);
     return &#x27;A / B = &#x27;+fmt(q.m1)+&#x27; / &#x27;+fmt(q.m2)+t(&#x27; M☉ · 初始间距 &#x27;,&#x27; M☉ · Initial separation &#x27;)+fmt(q.separation,1)+&#x27; km · &#x27;+
       (q.pn?q.pn+&#x27;PN&#x27;:t(&#x27;牛顿&#x27;,&#x27;Newtonian&#x27;))+&#x27; · &#x27;+(q.radiation?t(&#x27;辐射 &#x27;,&#x27;Radiation &#x27;)+fmt(q.strength)+&#x27;×&#x27;:t(&#x27;无耗散&#x27;,&#x27;No dissipation&#x27;));
@@ -4348,8 +4360,9 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   &lt;div class=&quot;text-small text-muted&quot;&gt;EMRI 的保守极限 · 无自旋黑洞背景 · 束缚轨道 · 不含辐射反作用或第三体&lt;/div&gt;
   &lt;div class=&quot;sg-toolbar&quot;&gt;
     &lt;button type=&quot;button&quot; class=&quot;btn btn-primary&quot; data-action=&quot;play&quot;&gt;开始演化&lt;/button&gt;&lt;button type=&quot;button&quot; class=&quot;btn&quot; data-action=&quot;reset&quot;&gt;回到初始&lt;/button&gt;&lt;button type=&quot;button&quot; class=&quot;btn&quot; data-action=&quot;step&quot;&gt;单步&lt;/button&gt;
-    &lt;label&gt;&lt;span class=&quot;sr-only&quot;&gt;测地线预设&lt;/span&gt;&lt;select class=&quot;form-select&quot; data-role=&quot;preset&quot;&gt;&lt;option value=&quot;flower&quot;&gt;进动花瓣&lt;/option&gt;&lt;option value=&quot;circular&quot;&gt;圆轨道&lt;/option&gt;&lt;option value=&quot;whirl&quot;&gt;近分界绕转 · zoom-whirl&lt;/option&gt;&lt;option value=&quot;weak&quot;&gt;弱场近开普勒轨道&lt;/option&gt;&lt;option value=&quot;custom&quot;&gt;自定义轨道&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
+    &lt;label&gt;&lt;span class=&quot;sr-only&quot;&gt;测地线预设&lt;/span&gt;&lt;select class=&quot;form-select&quot; data-role=&quot;preset&quot;&gt;&lt;option value=&quot;flower&quot;&gt;进动花瓣&lt;/option&gt;&lt;option value=&quot;circular&quot;&gt;圆轨道&lt;/option&gt;&lt;option value=&quot;whirl&quot;&gt;近分界绕转 · zoom-whirl&lt;/option&gt;&lt;option value=&quot;weak&quot;&gt;弱场近开普勒轨道&lt;/option&gt;&lt;option value=&quot;emri&quot;&gt;典型 EMRI · 偏心轨道快照&lt;/option&gt;&lt;option value=&quot;custom&quot;&gt;自定义轨道&lt;/option&gt;&lt;/select&gt;&lt;/label&gt;
   &lt;/div&gt;
+  &lt;p class=&quot;sg-emri-note text-small text-muted&quot; data-role=&quot;emri-preset-note&quot; hidden&gt;10 M☉ 致密天体绕 10⁶ M☉ 黑洞，质量比 μ/M = 10⁻⁵。此处展示无自旋、无耗散的轨道快照，可观察近心点进动与毫赫兹波形。&lt;/p&gt;
   &lt;div class=&quot;sg-stage&quot;&gt;
     &lt;section aria-label=&quot;Schwarzschild 轨道与状态&quot;&gt;
       &lt;div class=&quot;orbit-panel-heading&quot;&gt;&lt;h3&gt;轨道视图&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Schwarzschild 坐标投影&lt;/span&gt;&lt;/div&gt;
@@ -4407,6 +4420,8 @@ window.orbitalToy?.show(window.orbitalToy.mode);
     &#x27;圆轨道&#x27;:&#x27;Circular orbit&#x27;,
     &#x27;近分界绕转 · zoom-whirl&#x27;:&#x27;Near-separatrix zoom-whirl&#x27;,
     &#x27;弱场近开普勒轨道&#x27;:&#x27;Weak-field Kepler-like orbit&#x27;,
+    &#x27;典型 EMRI · 偏心轨道快照&#x27;:&#x27;Typical EMRI · Eccentric orbit snapshot&#x27;,
+    &#x27;10 M☉ 致密天体绕 10⁶ M☉ 黑洞，质量比 μ/M = 10⁻⁵。此处展示无自旋、无耗散的轨道快照，可观察近心点进动与毫赫兹波形。&#x27;:&#x27;A 10 M☉ compact object orbits a 10⁶ M☉ black hole with mass ratio μ/M = 10⁻⁵. This nonspinning, nondissipative snapshot illustrates periapsis precession and a millihertz waveform.&#x27;,
     &#x27;自定义轨道&#x27;:&#x27;Custom orbit&#x27;,
     &#x27;Schwarzschild 轨道与状态&#x27;:&#x27;Schwarzschild orbit and status&#x27;,
     &#x27;轨道视图&#x27;:&#x27;Orbit view&#x27;,
@@ -4459,7 +4474,7 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   const GR=window.Schwarzschild,SP=window.ToySpectrum,TAU=2*Math.PI,GM=1.32712440018e11,C=299792.458;
   const clamp=(v,a,b)=&gt;Math.max(a,Math.min(b,v)),fmt=(v,n=3)=&gt;Number(v).toLocaleString(&#x27;zh-CN&#x27;,{maximumFractionDigits:n}),fixed=(v,n=4)=&gt;Number(v).toLocaleString(&#x27;zh-CN&#x27;,{minimumFractionDigits:n,maximumFractionDigits:n});
   const defaults={mass:1e6,p:12,e:0.4,chi:180,angle:0,speed:0.35},limits={mass:[1e4,1e7],p:[6.01,120],e:[0,0.8],chi:[0,360],angle:[0,360],speed:[0.05,4]};
-  const presets={flower:{...defaults},circular:{...defaults,p:10,e:0},whirl:{...defaults,p:7.25,e:0.6,speed:0.2},weak:{...defaults,p:100,e:0.35}};
+  const presets={flower:{...defaults},circular:{...defaults,p:10,e:0},whirl:{...defaults,p:7.25,e:0.6,speed:0.2},weak:{...defaults,p:100,e:0.35},emri:{...defaults,e:0.3,speed:0.8}};
   function clean(input){const p={...defaults};for(const [k,[a,b]] of Object.entries(limits))if(Number.isFinite(input?.[k]))p[k]=clamp(input[k],a,b);return p;}
   let p=clean(window.orbitalToy?.modelContent?.geodesicParameters),m,state,time=0,running=false,last=performance.now(),dirty=true,lastDraw=0,trail=[],drag=null,geometry=null;
   const gw={samples:[],buffer:[],columns:[],dt:1,next:1,hop:0,size:512};
@@ -4480,8 +4495,23 @@ window.orbitalToy?.show(window.orbitalToy.mode);
     gw.size=spectral.size();
     SP.rebuildUniformStft(gw,gw.size,m.tunit,keepWaveAfter());
   }
-  function persist(){window.orbitalToy?.save({geodesicParameters:{...p}},{geodesicPreset:role(&#x27;preset&#x27;).value});}
+  function persist(){
+    const hub=window.orbitalToy;
+    hub.save({geodesicParameters:{...p}},{geodesicPreset:role(&#x27;preset&#x27;).value,mode:hub.mode});
+  }
+  function applyPreset(key,activate=false){
+    if(!Object.hasOwn(presets,key)){sync();return;}
+    p={...presets[key]};
+    role(&#x27;preset&#x27;).value=key;
+    reset();
+    if(activate){
+      window.orbitalToy.show(&#x27;geodesic&#x27;);
+      role(&#x27;preset&#x27;).focus();
+    }
+    persist();
+  }
   function sync(){
+    role(&#x27;emri-preset-note&#x27;).hidden=role(&#x27;preset&#x27;).value!==&#x27;emri&#x27;;
     for(const el of root.querySelectorAll(&#x27;[data-key]&#x27;)){
       const key=el.dataset.key;
       el.value=[&#x27;mass&#x27;,&#x27;speed&#x27;].includes(key)?Math.log10(p[key]):p[key];
@@ -4526,7 +4556,8 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   function edit(key,value){if(!Number.isFinite(value)){sync();return;}p[key]=clamp(value,...limits[key]);if(key===&#x27;speed&#x27;){sync();return;}role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();}
   for(const el of root.querySelectorAll(&#x27;[data-key]&#x27;)){el.addEventListener(&#x27;input&#x27;,()=&gt;{const key=el.dataset.key;edit(key,[&#x27;mass&#x27;,&#x27;speed&#x27;].includes(key)?10**Number(el.value):Number(el.value));});el.addEventListener(&#x27;change&#x27;,persist);}
   for(const el of root.querySelectorAll(&#x27;[data-number]&#x27;))el.addEventListener(&#x27;change&#x27;,()=&gt;{edit(el.dataset.number,el.value.trim()===&#x27;&#x27;?NaN:Number(el.value));persist();});
-  role(&#x27;preset&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{const preset=presets[role(&#x27;preset&#x27;).value];if(preset){p={...preset};reset();persist();}});
+  role(&#x27;preset&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;applyPreset(role(&#x27;preset&#x27;).value));
+  window.orbitalToy.openGeodesicPreset=key=&gt;applyPreset(key,true);
   $(&#x27;[data-action=&quot;play&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{if(!m.valid)return;running=!running;last=performance.now();draw();});$(&#x27;[data-action=&quot;reset&quot;]&#x27;).addEventListener(&#x27;click&#x27;,reset);$(&#x27;[data-action=&quot;step&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{advance(m.period/100);draw();});
   const orbit=role(&#x27;orbit&#x27;);function pointer(e){const b=orbit.getBoundingClientRect();return [e.clientX-b.left,e.clientY-b.top];}
   orbit.addEventListener(&#x27;pointerdown&#x27;,e=&gt;{if(!geometry||Math.hypot(...pointer(e).map((v,i)=&gt;v-geometry.pos[i]))&gt;24)return;e.preventDefault();running=false;p.chi=((state[0]*180/Math.PI)%360+360)%360;p.angle=((state[1]*180/Math.PI)%360+360)%360;drag={cx:geometry.cx,cy:geometry.cy,scale:geometry.scale};orbit.setPointerCapture(e.pointerId);status();});
@@ -4536,7 +4567,7 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   document.addEventListener(&#x27;orbital-language&#x27;,()=&gt;{sync();dirty=true;if(root.hidden)status();else draw();});
   document.addEventListener(&#x27;orbital-mode&#x27;,()=&gt;{running=false;last=performance.now();dirty=true;draw();});window.addEventListener(&#x27;openai:set_globals&#x27;,e=&gt;{const saved=e.detail?.globals?.widgetState?.modelContent?.geodesicParameters;if(!saved)return;const next=clean(saved);if(Object.keys(defaults).every(k=&gt;p[k]===next[k]))return;p=next;reset();});
   function frame(now){if(!root.isConnected){observer.disconnect();theme.disconnect();appearance.removeEventListener(&#x27;change&#x27;,onTheme);return;}const dt=clamp((now-last)/1000,0,0.05);last=now;if(!root.hidden&amp;&amp;!document.hidden){if(running)advance(dt*p.speed*m.period);if(dirty&amp;&amp;now-lastDraw&gt;50)draw();}requestAnimationFrame(frame);}
-  const saved=window.orbitalToy?.privateContent?.geodesicPreset;if(window.orbitalToy?.modelContent?.geodesicParameters)role(&#x27;preset&#x27;).value=saved in presets?saved:&#x27;custom&#x27;;reset();requestAnimationFrame(frame);
+  const saved=window.orbitalToy?.privateContent?.geodesicPreset;if(window.orbitalToy?.modelContent?.geodesicParameters)role(&#x27;preset&#x27;).value=Object.hasOwn(presets,saved)?saved:&#x27;custom&#x27;;reset();requestAnimationFrame(frame);
   window.OrbitFavorites.attach({root,mode:&#x27;geodesic&#x27;,read:()=&gt;({...p}),load:values=&gt;{p=clean(values);role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();persist();},describe:values=&gt;{const q=clean(values);return &#x27;M = &#x27;+fmt(q.mass)+&#x27; M☉ · p = &#x27;+fmt(q.p,4)+&#x27; · e = &#x27;+fmt(q.e,4)+&#x27; · χ / φ = &#x27;+fmt(q.chi,1)+&#x27;° / &#x27;+fmt(q.angle,1)+&#x27;°&#x27;;}});
 })();
 window.orbitalToy?.show(window.orbitalToy.mode);
@@ -4660,7 +4691,11 @@ html &gt; body {
   outline-offset: 3px;
 }
 :is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-toolbar, .em-toolbar, .sg-toolbar) { gap: 8px; margin: 16px 0 0; }
-:is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-toolbar, .em-toolbar, .sg-toolbar) &gt; label { margin-left: auto; flex: 0 1 390px; }
+:is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-toolbar, .em-toolbar, .sg-toolbar) &gt; label { margin-left: auto; flex: 0 1 440px; min-width: 0; }
+:is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-toolbar, .em-toolbar, .sg-toolbar) :is(.btn, .form-select) { min-height: 46px; font-size: 14px; }
+:is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-toolbar, .em-toolbar, .sg-toolbar) &gt; .btn { padding-inline: 16px; font-weight: 600; }
+:is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-toolbar, .em-toolbar, .sg-toolbar) &gt; .btn-primary { min-width: 112px; }
+.sg-emri-note { margin: 10px 0 0; }
 :is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-stage, .em-stage, .sg-stage) { gap: 18px; margin-top: 18px; align-items: stretch; }
 :is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-stage, .em-stage, .sg-stage) &gt; section {
   padding: 18px;
