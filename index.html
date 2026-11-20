@@ -4573,6 +4573,14 @@ window.orbitalToy?.show(window.orbitalToy.mode);
 window.orbitalToy?.show(window.orbitalToy.mode);
 &lt;/script&gt;
 
+&lt;footer class=&quot;orbit-footer&quot; aria-labelledby=&quot;orbit-model-note&quot;&gt;
+  &lt;strong id=&quot;orbit-model-note&quot; data-en=&quot;About the model&quot;&gt;模型说明&lt;/strong&gt;
+  &lt;p data-en=&quot;This educational toy model uses planar orbits and initially nonspinning bodies. The binary and three-body modes use Newtonian gravity with optional finite-order post-Newtonian corrections. The Schwarzschild mode follows a test particle in a fixed spacetime. The waveforms and merger animation are illustrative. Full numerical relativity lies outside the scope of the model.&quot;&gt;这是一个教学用的玩具模型，采用二维平面轨道，初始天体无自旋。双星和三体以牛顿引力为基础，可选有限阶后牛顿近似。Schwarzschild 模式计算固定时空中的试验粒子测地线。波形与并合动画用于定性演示，完整的数值相对论演化超出本模型范围。&lt;/p&gt;
+&lt;/footer&gt;
+&lt;script&gt;
+  window.OrbitLocale.localize(document.querySelector(&#x27;.orbit-footer&#x27;));
+&lt;/script&gt;
+
 &lt;style&gt;
 /* Shared presentation layer. Simulation and persisted parameter schemas stay in their modules. */
 :root {
@@ -4612,6 +4620,16 @@ html &gt; body {
 .orbit-brand-name { display: flex; align-items: baseline; flex-wrap: wrap; gap: 1px 8px; line-height: 1.3; }
 .orbit-version { color: var(--orbit-secondary); font-size: 11px; letter-spacing: 0; white-space: nowrap; }
 .orbit-brand-note { padding-left: 12px; border-left: 1px solid var(--orbit-line); font-size: 12px; font-weight: 400; letter-spacing: .02em; }
+.orbit-footer {
+  margin-top: 28px;
+  padding-top: 14px;
+  border-top: 1px solid var(--orbit-line);
+  color: var(--orbit-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+.orbit-footer strong { color: var(--foreground); font-weight: 600; }
+.orbit-footer p { max-width: 76ch; margin: 4px 0 0; }
 #orbital-modes {
   grid-area: modes;
   display: flex;
