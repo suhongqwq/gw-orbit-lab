@@ -2341,12 +2341,12 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     }
     return columns;
   }
-  function attach(root,key,changed,defaultAxis=&#x27;linear&#x27;){
+  function attach(root,key,changed){
     const saved=host.orbitalToy?.privateContent?.[key]||{};
     const restore=value=&gt;({
-      quality:[&#x27;time&#x27;,&#x27;balanced&#x27;,&#x27;frequency&#x27;].includes(value.quality)?value.quality:&#x27;balanced&#x27;,
+      quality:[&#x27;time&#x27;,&#x27;balanced&#x27;,&#x27;frequency&#x27;].includes(value.quality)?value.quality:&#x27;frequency&#x27;,
       smooth:value.smooth!==false,method:value.method===&#x27;cqt&#x27;?&#x27;cqt&#x27;:&#x27;stft&#x27;,
-      axis:[&#x27;linear&#x27;,&#x27;log&#x27;,&#x27;wide&#x27;].includes(value.axis)?value.axis:defaultAxis,range:value.range===60?60:40
+      axis:[&#x27;linear&#x27;,&#x27;log&#x27;,&#x27;wide&#x27;].includes(value.axis)?value.axis:&#x27;log&#x27;,range:value.range===60?60:40
     });
     const prefs=restore(saved);
     const container=document.createElement(&#x27;div&#x27;);container.className=&#x27;spectrum-controls&#x27;;
@@ -3370,7 +3370,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   const gw={samples:[],columns:[],recent:[],dt:GW_INITIAL_DT,next:GW_INITIAL_DT,size:512,
     viewBounds:{start:0,end:GW_VIEW},viewTween:null,viewEase:1,amplitudeLimit:null,frequencyLimits:null,
     visible:{plus:true,cross:true},dirty:true,lastDraw:0,colors:null,hover:null};
-  const spectral=SP.attach(root,&#x27;binarySpectrum&#x27;,rebuild=&gt;{if(rebuild)rebuildSpectrum();gw.dirty=true;if(!root.hidden)drawGW(true);},&#x27;log&#x27;);
+  const spectral=SP.attach(root,&#x27;binarySpectrum&#x27;,rebuild=&gt;{if(rebuild)rebuildSpectrum();gw.dirty=true;if(!root.hidden)drawGW(true);});
   const spectrumGuides=[{key:&#x27;frequency&#x27;,get label(){return t(&#x27;模型瞬时频率&#x27;,&#x27;Model instantaneous frequency&#x27;);},phase:true}];
   function sampleWave() {
     const q=post?RD.valueAt(post,time):wavePoint(state,time,model),sample={t:time,...q};
