@@ -102,7 +102,7 @@
   --red: light-dark(rgb(224 46 42), rgb(255 103 100));
   --purple: light-dark(rgb(146 79 247), rgb(173 123 249));
   --yellow: light-dark(rgb(255 195 0), rgb(255 210 64));
-  --viz-series-1: var(--primary);
+  --viz-series-1: light-dark(rgb(51 156 255), rgb(131 195 255));
   --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
   --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
   --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
@@ -5258,6 +5258,12 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   &lt;strong id=&quot;orbit-model-note&quot; data-en=&quot;About the model&quot;&gt;模型说明&lt;/strong&gt;
   &lt;p data-en=&quot;This educational toy model uses planar orbits and initially nonspinning bodies. The binary and three-body modes use Newtonian gravity with optional finite-order post-Newtonian corrections. The Schwarzschild mode follows a test particle in a fixed spacetime. The waveforms and merger animation are illustrative. Full numerical relativity lies outside the scope of the model.&quot;&gt;这是一个教学用的玩具模型，采用二维平面轨道，初始天体无自旋。双星和三体以牛顿引力为基础，可选有限阶后牛顿近似。Schwarzschild 模式计算固定时空中的试验粒子测地线。波形与并合动画用于定性演示，完整的数值相对论演化超出本模型范围。&lt;/p&gt;
   &lt;p class=&quot;orbit-repository&quot;&gt;&lt;span data-en=&quot;GitHub repository&quot;&gt;GitHub 仓库&lt;/span&gt; &lt;a href=&quot;https://github.com/suhongqwq/gw-orbit-lab&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;github.com/suhongqwq/gw-orbit-lab&lt;/a&gt;&lt;/p&gt;
+  &lt;!-- GitHub Insights traffic snapshot. Update the total and UTC dates together. --&gt;
+  &lt;p class=&quot;orbit-repository-traffic&quot;&gt;
+    &lt;span data-en=&quot;GitHub repository views&quot;&gt;GitHub 仓库浏览量&lt;/span&gt;
+    &lt;strong class=&quot;tabular-nums&quot;&gt;8&lt;/strong&gt;
+    &lt;span class=&quot;orbit-traffic-dates tabular-nums&quot;&gt;&lt;time datetime=&quot;2026-11-08&quot;&gt;2026-11-08&lt;/time&gt; – &lt;time datetime=&quot;2026-11-21&quot;&gt;2026-11-21&lt;/time&gt; UTC&lt;/span&gt;
+  &lt;/p&gt;
 &lt;/footer&gt;
 &lt;script&gt;
   window.OrbitLocale.localize(document.querySelector(&#x27;.orbit-footer&#x27;));
@@ -5314,6 +5320,8 @@ html &gt; body {
 .orbit-footer p { max-width: 76ch; margin: 4px 0 0; }
 .orbit-footer .orbit-repository { margin-top: 8px; }
 .orbit-repository a { color: var(--orbit-action); overflow-wrap: anywhere; text-underline-offset: 0.15em; }
+.orbit-repository-traffic { display: flex; align-items: baseline; gap: 0 8px; flex-wrap: wrap; }
+.orbit-traffic-dates { font-size: 12px; }
 #orbital-modes {
   grid-area: modes;
   display: flex;
