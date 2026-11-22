@@ -21,6 +21,7 @@ jobs:
       TRAFFIC_SINCE: '2026-11-20'
       TRAFFIC_REF: refs/heads/traffic-data
       TRAFFIC_FILENAME: repo-traffic.json
+      BADGE_FILENAME: repo-traffic.svg
     steps:
       - name: Check whether traffic collection is configured
         id: configuration
@@ -57,8 +58,9 @@ jobs:
           TRAFFIC_READ_TOKEN: ${{ secrets.TRAFFIC_READ_TOKEN }}
         shell: bash
         run: |
-          python3 scripts/update-repo-traffic.py --since "$TRAFFIC_SINCE" --output "$SNAPSHOT_FILE"
-      - name: Publish the aggregate to the traffic-data branch
+          python3 scripts/update-repo-traffic.py --since "$TRAFFIC_SINCE" --output "$SNAPSHOT_FILE" \
+            --badge "$RUNNER_TEMP/$BADGE_FILENAME"
+      - name: Publish the aggregate and badge to the traffic-data branch
         if: steps.configuration.outputs.ready == 'true'
         env:
           PARENT_COMMIT: ${{ steps.checkpoint.outputs.parent }}
@@ -74,6 +76,8 @@ jobs:
           fi
           blob=$(git hash-object -w "$SNAPSHOT_FILE")
           git update-index --add --cacheinfo "100644,$blob,$TRAFFIC_FILENAME"
+          badge_blob=$(git hash-object -w "$RUNNER_TEMP/$BADGE_FILENAME")
+          git update-index --add --cacheinfo "100644,$badge_blob,$BADGE_FILENAME"
           tree=$(git write-tree)
           if [[ -n "$PARENT_COMMIT" && "$tree" == "$(git rev-parse "$PARENT_COMMIT^{tree}")" ]]; then
             echo 'The public summary is already current.'

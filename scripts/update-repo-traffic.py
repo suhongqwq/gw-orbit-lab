@@ -89,6 +89,38 @@ def update_summary(existing, payload, since, today):
             "coverageComplete": coverage, "sealedThrough": seal_target.isoformat(), "sealedTotal": sealed_total}
 
 
+def render_badge(summary):
+    """Render a standalone SVG from an already collected public summary."""
+    total = count_value(summary.get("total"))
+    complete = summary.get("coverageComplete")
+    if not isinstance(complete, bool):
+        raise ValueError("Expected a boolean coverage status for the repository traffic badge.")
+    value = f"{total:,}{'' if complete else '+'}"
+    title = f"Repository views: {value}" + (" (coverage incomplete)" if not complete else "")
+    label_width = 75
+    value_width = max(35, 16 + 7 * len(value))
+    width = label_width + value_width
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="22" viewBox="0 0 {width} 22" role="img" aria-labelledby="title">
+  <title id="title">{title}</title>
+  <clipPath id="frame"><rect width="{width}" height="22" rx="4"/></clipPath>
+  <g clip-path="url(#frame)">
+    <rect width="{width}" height="22" fill="#303b4d"/>
+    <rect x="{label_width}" width="{value_width}" height="22" fill="#2b584e"/>
+  </g>
+  <g fill="#f8fafc" text-anchor="middle" font-family="Verdana,DejaVu Sans,sans-serif" font-size="11" font-weight="600" aria-hidden="true">
+    <text x="{label_width / 2:g}" y="15">Repo views</text>
+    <text x="{label_width + value_width / 2:g}" y="15">{value}</text>
+  </g>
+</svg>
+'''
+
+
+def replace_text(path, content):
+    scratch = path.with_name(f".{path.name}.tmp")
+    scratch.write_text(content, encoding="utf-8", newline="\n")
+    scratch.replace(path)
+
+
 class RefuseRedirects(HTTPRedirectHandler):
     def redirect_request(self, req, fp, code, msg, headers, newurl):
         return None
@@ -113,6 +145,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--since", required=True, help="UTC release date in YYYY-MM-DD format")
     parser.add_argument("--output", required=True, type=Path, help="Existing and updated public summary file")
+    parser.add_argument("--badge", type=Path, help="Also write an SVG badge using the same summary")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY"), help="OWNER/REPO for a live request")
     parser.add_argument("--input", help="Read a trusted traffic API export from a file or '-' for stdin")
     parser.add_argument("--today", help="UTC observation date for an API export")
@@ -121,6 +154,8 @@ def main():
         parser.error("--today can only be set with --input.")
 
     try:
+        if args.badge is not None and args.badge.resolve() == args.output.resolve():
+            raise ValueError("The badge and the JSON summary need different output files.")
         since = utc_date(args.since)
         today = utc_date(args.today) if args.today else datetime.now(timezone.utc).date()
         existing = json.loads(args.output.read_text(encoding="utf-8")) if args.output.exists() else None
@@ -131,9 +166,9 @@ def main():
         else:
             payload = json.loads(Path(args.input).read_text(encoding="utf-8"))
         summary = update_summary(existing, payload, since, today)
-        scratch = args.output.with_name(f".{args.output.name}.tmp")
-        scratch.write_text(json.dumps(summary, indent=2) + "\n", encoding="utf-8", newline="\n")
-        scratch.replace(args.output)
+        if args.badge is not None:
+            replace_text(args.badge, render_badge(summary))
+        replace_text(args.output, json.dumps(summary, indent=2) + "\n")
     except HTTPError as error:
         reason = (" Check the token's repository access and Administration: Read permission."
                   if error.code in (401, 403, 404) else "")

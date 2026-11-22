@@ -4,6 +4,8 @@
 
 **[在线试玩](https://suhongqwq.github.io/gw-orbit-lab/)** · 下载 `index.html` 也可离线打开
 
+[![GitHub 仓库累计浏览量](https://raw.githubusercontent.com/suhongqwq/gw-orbit-lab/traffic-data/repo-traffic.svg)](https://github.com/suhongqwq/gw-orbit-lab/blob/traffic-data/repo-traffic.json)
+
 ## 并合前的啁啾
 
 ![GW150914 质量预设的频率优先 STFT 长窗时频图，亮色谱带在并合参考时刻之前逐渐上升](docs/images/gw150914-chirp.png)
