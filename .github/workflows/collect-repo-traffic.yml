@@ -21,7 +21,6 @@ jobs:
       TRAFFIC_SINCE: '2026-11-20'
       TRAFFIC_REF: refs/heads/traffic-data
       TRAFFIC_FILENAME: repo-traffic.json
-      SNAPSHOT_FILE: ${{ runner.temp }}/repo-traffic.json
     steps:
       - name: Check whether traffic collection is configured
         id: configuration
@@ -41,6 +40,8 @@ jobs:
         id: checkpoint
         shell: bash
         run: |
+          SNAPSHOT_FILE="$RUNNER_TEMP/repo-traffic.json"
+          printf 'SNAPSHOT_FILE=%s\n' "$SNAPSHOT_FILE" >> "$GITHUB_ENV"
           if git ls-remote --exit-code --heads origin "$TRAFFIC_REF" >/dev/null; then
             git fetch --no-tags --depth=1 origin "$TRAFFIC_REF"
             parent=$(git rev-parse FETCH_HEAD)
