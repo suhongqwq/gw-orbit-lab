@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="referrer" content="no-referrer">
-<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com https://persistent.oaistatic.com/plugins/visualize/; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com https://persistent.oaistatic.com/plugins/visualize/charts/; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com https://persistent.oaistatic.com/plugins/visualize/; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com https://persistent.oaistatic.com/plugins/visualize/charts/; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data: https://raw.githubusercontent.com; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
 <title>引力波轨道实验室</title>
 <style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
 
@@ -5258,15 +5258,28 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   &lt;strong id=&quot;orbit-model-note&quot; data-en=&quot;About the model&quot;&gt;模型说明&lt;/strong&gt;
   &lt;p data-en=&quot;This educational toy model uses planar orbits and initially nonspinning bodies. The binary and three-body modes use Newtonian gravity with optional finite-order post-Newtonian corrections. The Schwarzschild mode follows a test particle in a fixed spacetime. The waveforms and merger animation are illustrative. Full numerical relativity lies outside the scope of the model.&quot;&gt;这是一个教学用的玩具模型，采用二维平面轨道，初始天体无自旋。双星和三体以牛顿引力为基础，可选有限阶后牛顿近似。Schwarzschild 模式计算固定时空中的试验粒子测地线。波形与并合动画用于定性演示，完整的数值相对论演化超出本模型范围。&lt;/p&gt;
   &lt;p class=&quot;orbit-repository&quot;&gt;&lt;span data-en=&quot;GitHub repository&quot;&gt;GitHub 仓库&lt;/span&gt; &lt;a href=&quot;https://github.com/suhongqwq/gw-orbit-lab&quot; target=&quot;_blank&quot; rel=&quot;noopener noreferrer&quot;&gt;github.com/suhongqwq/gw-orbit-lab&lt;/a&gt;&lt;/p&gt;
-  &lt;!-- GitHub Insights traffic snapshot. Update the total and UTC dates together. --&gt;
   &lt;p class=&quot;orbit-repository-traffic&quot;&gt;
     &lt;span data-en=&quot;GitHub repository views&quot;&gt;GitHub 仓库浏览量&lt;/span&gt;
     &lt;strong class=&quot;tabular-nums&quot;&gt;8&lt;/strong&gt;
-    &lt;span class=&quot;orbit-traffic-dates tabular-nums&quot;&gt;&lt;time datetime=&quot;2026-11-08&quot;&gt;2026-11-08&lt;/time&gt; – &lt;time datetime=&quot;2026-11-21&quot;&gt;2026-11-21&lt;/time&gt; UTC&lt;/span&gt;
+    &lt;span class=&quot;orbit-traffic-dates tabular-nums&quot;&gt;&lt;span data-en=&quot;Since&quot;&gt;自&lt;/span&gt; &lt;time datetime=&quot;2026-11-20&quot;&gt;2026-11-20&lt;/time&gt; UTC&lt;/span&gt;
+    &lt;span data-traffic-gap data-en=&quot;Some days missing&quot; hidden&gt;部分日期缺失&lt;/span&gt;
   &lt;/p&gt;
 &lt;/footer&gt;
 &lt;script&gt;
-  window.OrbitLocale.localize(document.querySelector(&#x27;.orbit-footer&#x27;));
+  (() =&gt; {
+    const footer = document.querySelector(&#x27;.orbit-footer&#x27;);
+    window.OrbitLocale.localize(footer);
+    const count = footer.querySelector(&#x27;.orbit-repository-traffic strong&#x27;);
+    const gap = footer.querySelector(&#x27;[data-traffic-gap]&#x27;);
+    window.addEventListener(&#x27;message&#x27;, event =&gt; {
+      if (event.origin !== &#x27;https://suhongqwq.github.io&#x27; || event.source !== window.parent ||
+          event.data?.type !== &#x27;orbit-repo-traffic&#x27;) return;
+      const {total, coverageComplete} = event.data;
+      if (!Number.isSafeInteger(total) || total &lt; 0 || typeof coverageComplete !== &#x27;boolean&#x27;) return;
+      count.textContent = new Intl.NumberFormat(&#x27;en-US&#x27;).format(total);
+      gap.hidden = coverageComplete;
+    });
+  })();
 &lt;/script&gt;
 
 &lt;style&gt;
@@ -6478,6 +6491,32 @@ html &gt; body {
     document.title = title;
     frame.title = title;
   });
+})();
+</script>
+<script>
+(() => {
+  if (window.top !== window || location.origin !== 'https://suhongqwq.github.io' ||
+      !['/gw-orbit-lab/', '/gw-orbit-lab/index.html'].includes(location.pathname)) return;
+
+  const frame = document.getElementById('codex-visualization');
+  let summary;
+  // The srcdoc frame has an opaque origin. Only the public aggregate crosses this bridge.
+  function displayTraffic() {
+    if (summary) frame.contentWindow?.postMessage(summary, '*');
+  }
+  frame.addEventListener('load', displayTraffic);
+
+  const url = 'https://raw.githubusercontent.com/suhongqwq/gw-orbit-lab/traffic-data/repo-traffic.json';
+  fetch(url, {credentials: 'omit', referrerPolicy: 'no-referrer', cache: 'no-cache'})
+    .then(response => response.ok ? response.json() : null)
+    .then(info => {
+      if (info?.since !== '2026-11-20' || !Number.isSafeInteger(info.total) || info.total < 0 ||
+          typeof info.coverageComplete !== 'boolean' ||
+          !/^\d{4}-\d{2}-\d{2}$/.test(info.lastObserved) || info.lastObserved < info.since) return;
+      summary = {type: 'orbit-repo-traffic', total: info.total, coverageComplete: info.coverageComplete};
+      displayTraffic();
+    })
+    .catch(() => {}); // Keep the verified build-time snapshot when the data host is unavailable.
 })();
 </script>
 </body>

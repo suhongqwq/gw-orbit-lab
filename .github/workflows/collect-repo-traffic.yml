@@ -1,0 +1,84 @@
+name: Collect repository traffic
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '23 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: collect-public-repo-traffic
+  cancel-in-progress: false
+
+jobs:
+  collect:
+    if: github.ref_name == github.event.repository.default_branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TRAFFIC_SINCE: '2026-11-20'
+      TRAFFIC_REF: refs/heads/traffic-data
+      TRAFFIC_FILENAME: repo-traffic.json
+      SNAPSHOT_FILE: ${{ runner.temp }}/repo-traffic.json
+    steps:
+      - name: Check whether traffic collection is configured
+        id: configuration
+        env:
+          TRAFFIC_READ_TOKEN: ${{ secrets.TRAFFIC_READ_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "$TRAFFIC_READ_TOKEN" ]]; then
+            echo '::notice::Traffic collection is waiting for the TRAFFIC_READ_TOKEN repository secret (Administration: Read).'
+          else
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        if: steps.configuration.outputs.ready == 'true'
+      - name: Read the current public checkpoint
+        if: steps.configuration.outputs.ready == 'true'
+        id: checkpoint
+        shell: bash
+        run: |
+          if git ls-remote --exit-code --heads origin "$TRAFFIC_REF" >/dev/null; then
+            git fetch --no-tags --depth=1 origin "$TRAFFIC_REF"
+            parent=$(git rev-parse FETCH_HEAD)
+            git show "${parent}:${TRAFFIC_FILENAME}" > "$SNAPSHOT_FILE"
+            printf 'parent=%s\n' "$parent" >> "$GITHUB_OUTPUT"
+          else
+            status=$?
+            if [[ "$status" -ne 2 ]]; then exit "$status"; fi
+          fi
+      - name: Update the aggregate from GitHub
+        if: steps.configuration.outputs.ready == 'true'
+        env:
+          TRAFFIC_READ_TOKEN: ${{ secrets.TRAFFIC_READ_TOKEN }}
+        shell: bash
+        run: |
+          python3 scripts/update-repo-traffic.py --since "$TRAFFIC_SINCE" --output "$SNAPSHOT_FILE"
+      - name: Publish the aggregate to the traffic-data branch
+        if: steps.configuration.outputs.ready == 'true'
+        env:
+          PARENT_COMMIT: ${{ steps.checkpoint.outputs.parent }}
+        shell: bash
+        run: |
+          export GIT_INDEX_FILE="$RUNNER_TEMP/repo-traffic-index"
+          parents=()
+          if [[ -n "$PARENT_COMMIT" ]]; then
+            git read-tree "$PARENT_COMMIT"
+            parents=(-p "$PARENT_COMMIT")
+          else
+            git read-tree --empty
+          fi
+          blob=$(git hash-object -w "$SNAPSHOT_FILE")
+          git update-index --add --cacheinfo "100644,$blob,$TRAFFIC_FILENAME"
+          tree=$(git write-tree)
+          if [[ -n "$PARENT_COMMIT" && "$tree" == "$(git rev-parse "$PARENT_COMMIT^{tree}")" ]]; then
+            echo 'The public summary is already current.'
+            exit 0
+          fi
+          commit=$(git -c user.name='github-actions[bot]' \
+            -c user.email='41898282+github-actions[bot]@users.noreply.github.com' \
+            commit-tree "$tree" "${parents[@]}" -m 'Update public repository traffic')
+          git push origin "$commit:$TRAFFIC_REF"
