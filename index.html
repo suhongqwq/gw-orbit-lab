@@ -2309,7 +2309,26 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     const properRadial=rd*m.E/lapse,residual=properRadial**2+lapse*(1+m.L*m.L/(r*r))-m.E*m.E;
     return {r,rd,omega,x,y,vx,vy,ax,ay,plus,cross,residual,properRate:lapse/m.E};
   }
-  const api={rates,make,derivative,step,point};
+  function referencePath(initialChi,initialPhi,m){
+    if(!m.valid)return [];
+    const azimuth=m.e===0?TAU:m.azimuth;
+    const segments=Math.min(8192,Math.max(128,Math.ceil(azimuth/0.075)));
+    const h=azimuth/segments,points=[];
+    // Stepping in phi resolves the whirl without integrating the sharply
+    // peaked dphi/dchi at periapsis. This path serves only as a visual guide.
+    const dChiDphi=chi=&gt;{const [dc,dp]=rates(chi,m.p,m.e);return dc/dp;};
+    let chi=initialChi;
+    for(let i=0;i&lt;segments;i++){
+      const phi=initialPhi+i*h,r=m.p/(1+m.e*Math.cos(chi));
+      points.push([r*Math.cos(phi),r*Math.sin(phi)]);
+      const a=dChiDphi(chi),b=dChiDphi(chi+h*a/2),c=dChiDphi(chi+h*b/2),d=dChiDphi(chi+h*c);
+      chi+=h*(a+2*b+2*c+d)/6;
+    }
+    const phi=initialPhi+azimuth,r=m.p/(1+m.e*Math.cos(initialChi));
+    points.push([r*Math.cos(phi),r*Math.sin(phi)]);
+    return points;
+  }
+  const api={rates,make,derivative,step,point,referencePath};
   if(typeof module===&#x27;object&#x27;&amp;&amp;module.exports)module.exports=api;else host.Schwarzschild=api;
 })(typeof window===&#x27;object&#x27;?window:globalThis);
 
@@ -3531,13 +3550,13 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   &lt;div class=&quot;orbit-panel-heading&quot;&gt;&lt;h3&gt;轨道视图&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;质心参考系&lt;/span&gt;&lt;/div&gt;
   &lt;svg class=&quot;be-orbit&quot; role=&quot;img&quot; aria-label=&quot;两颗星绕质心运行。拖动星体设置位置，拖动空心速度箭头端点设置速度。滑块提供相同的键盘操作。&quot;&gt;
     &lt;title&gt;交互式双星轨道&lt;/title&gt;
-    &lt;desc&gt;实线为已走过的轨迹，虚线为初始牛顿轨道；星体圆点为示意尺寸。&lt;/desc&gt;
+    &lt;desc data-en=&quot;Solid lines show travelled trajectories. Colored dashes show the initial Keplerian guides. Body sizes are illustrative.&quot;&gt;实线是已走轨迹，彩色虚线是初始开普勒参考线。星体尺寸为示意。&lt;/desc&gt;
     &lt;defs&gt;&lt;clipPath id=&quot;be-clip&quot;&gt;&lt;rect data-role=&quot;cliprect&quot;/&gt;&lt;/clipPath&gt;&lt;/defs&gt;
     &lt;rect data-role=&quot;frame&quot; fill=&quot;none&quot; stroke=&quot;var(--border)&quot;/&gt;
     &lt;g data-role=&quot;grid&quot; stroke=&quot;var(--border)&quot; stroke-width=&quot;1&quot; opacity=&quot;0.5&quot;&gt;&lt;/g&gt;
     &lt;g clip-path=&quot;url(#be-clip)&quot;&gt;
-      &lt;path data-role=&quot;referenceA&quot; fill=&quot;none&quot; stroke=&quot;var(--border)&quot; stroke-width=&quot;1.5&quot; stroke-dasharray=&quot;4 5&quot;/&gt;
-      &lt;path data-role=&quot;referenceB&quot; fill=&quot;none&quot; stroke=&quot;var(--border)&quot; stroke-width=&quot;1.5&quot; stroke-dasharray=&quot;4 5&quot;/&gt;
+      &lt;path data-role=&quot;referenceA&quot; class=&quot;orbit-initial-guide&quot; stroke=&quot;var(--orbit-guide-a)&quot;/&gt;
+      &lt;path data-role=&quot;referenceB&quot; class=&quot;orbit-initial-guide&quot; stroke=&quot;var(--orbit-guide-b)&quot;/&gt;
       &lt;path data-role=&quot;trailA&quot; fill=&quot;none&quot; stroke=&quot;var(--viz-series-1)&quot; stroke-width=&quot;2&quot; opacity=&quot;0.7&quot;/&gt;
       &lt;path data-role=&quot;trailB&quot; fill=&quot;none&quot; stroke=&quot;var(--viz-series-2)&quot; stroke-width=&quot;2&quot; opacity=&quot;0.7&quot;/&gt;
       &lt;line data-role=&quot;connector&quot; stroke=&quot;var(--border)&quot; stroke-width=&quot;1&quot;/&gt;
@@ -3559,7 +3578,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     &lt;g data-role=&quot;scale&quot; stroke=&quot;var(--foreground)&quot;&gt;&lt;path data-role=&quot;scaleline&quot; fill=&quot;none&quot;/&gt;&lt;text data-role=&quot;scalelabel&quot; stroke=&quot;none&quot; class=&quot;text-small&quot;/&gt;&lt;/g&gt;
     &lt;text data-role=&quot;orbitnote&quot; class=&quot;text-small&quot; x=&quot;12&quot; y=&quot;26&quot;&gt;拖动星体 / 空心速度端点&lt;/text&gt;
   &lt;/svg&gt;
-  &lt;div class=&quot;be-legend text-small&quot;&gt;&lt;span&gt;&lt;i class=&quot;be-swatch&quot; style=&quot;background:var(--viz-series-1)&quot;&gt;&lt;/i&gt;星 A&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;be-swatch&quot; style=&quot;background:var(--viz-series-2)&quot;&gt;&lt;/i&gt;星 B&lt;/span&gt;&lt;span class=&quot;text-muted&quot;&gt;虚线：初始开普勒轨道&lt;/span&gt;&lt;/div&gt;
+  &lt;div class=&quot;be-legend text-small&quot;&gt;&lt;span&gt;&lt;i class=&quot;be-swatch&quot; style=&quot;background:var(--viz-series-1)&quot;&gt;&lt;/i&gt;星 A&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;be-swatch&quot; style=&quot;background:var(--viz-series-2)&quot;&gt;&lt;/i&gt;星 B&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;orbit-guide-swatch&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;span data-en=&quot;Initial Keplerian guide&quot;&gt;初始开普勒参考线&lt;/span&gt;&lt;/span&gt;&lt;/div&gt;
   &lt;output class=&quot;be-linked-readout text-small tabular-nums&quot; data-role=&quot;linked-orbit-note&quot; hidden&gt;&lt;/output&gt;
   &lt;div class=&quot;be-metrics be-readouts tabular-nums&quot;&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;时间&lt;/span&gt;&lt;output data-value=&quot;time&quot;&gt;0.0000 s&lt;/output&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;间距&lt;/span&gt;&lt;output data-value=&quot;distance&quot;&gt;3,000.0 km&lt;/output&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;牛顿密切偏心率&lt;/span&gt;&lt;output data-value=&quot;eccentricity&quot;&gt;0.000&lt;/output&gt;&lt;/span&gt;&lt;/div&gt;
   &lt;div class=&quot;be-status text-small&quot; data-role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
@@ -3683,7 +3702,6 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     &#x27;拖动星体 / 空心速度端点&#x27;:&#x27;Drag bodies or hollow velocity tips&#x27;,
     &#x27;星 A&#x27;:&#x27;Body A&#x27;,
     &#x27;星 B&#x27;:&#x27;Body B&#x27;,
-    &#x27;虚线：初始开普勒轨道&#x27;:&#x27;Dashed: initial Keplerian orbits&#x27;,
     &#x27;时间&#x27;:&#x27;Time&#x27;,
     &#x27;间距&#x27;:&#x27;Separation&#x27;,
     &#x27;牛顿密切偏心率&#x27;:&#x27;Newtonian osculating eccentricity&#x27;,
@@ -3871,7 +3889,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   const GW_INITIAL_DT=TAU/256, GW_VIEW=8*TAU;
   let radialHistory,comparison=null;
   let p=clean(window.openai?.widgetState?.modelContent?.parameters), model=makeModel(p), state=initial(p);
-  let time=0, running=false, stopped=null, trail=[], reference=[], e0=0, h0=0, last=0, raf=0, drag=null,post=null;
+  let time=0, running=false, stopped=null, trail=[], reference=[], e0=0, h0=0, last=0, raf=0, drag=null,dragCandidate=null,post=null;
   let w=736,h=350,extent=1.4,scale=100,cx=368,cy=175,velocityScale=80,chartDirty=true;
   const svg=$(&#x27;.be-orbit&#x27;), play=$(&#x27;[data-action=&quot;play&quot;]&#x27;);
   const fmt=(v,n=2)=&gt;Number(v).toLocaleString(&#x27;zh-CN&#x27;,{maximumFractionDigits:n});
@@ -4258,7 +4276,10 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
       &#x27;The selected PN order has no circular solution at this initial state. Increase the initial separation.&#x27;);
     trail=[[...state.slice(0,2)]];reference=referenceOrbit();
     const o=orbit(state),inv=PN.invariants(state,model);e0=inv.energy;h0=inv.angular;
-    if(!keepView) extent=1.2*Math.max(0.8,Math.min(o.a&lt;Infinity?o.a*(1+o.e):1.4,3))*Math.max(p.m1,p.m2)/(p.m1+p.m2)+0.05;
+    if(!keepView){
+      clearDragCapture();
+      extent=1.2*Math.max(0.8,Math.min(o.a&lt;Infinity?o.a*(1+o.e):1.4,3))*Math.max(p.m1,p.m2)/(p.m1+p.m2)+0.05;
+    }
     resetWave();syncControls();chartDirty=true;setStatus();draw();
   }
   function prepareTailSampling() {
@@ -4483,7 +4504,6 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     const increment=(hi-lo)/40*(event.key===&#x27;ArrowLeft&#x27;?-1:1);
     locateWave(clamp((gw.locator?.sample.t??(lo+hi)/2)+increment,lo,hi),plot.bounds);
   });
-  function pointer(event) {const box=svg.getBoundingClientRect();return [(event.clientX-box.left)*w/box.width,(event.clientY-box.top)*h/box.height];}
   function adoptCurrent() {
     const o=orbit(state),angle=Math.atan2(state[1],state[0]),vc=PN.circularSpeed(model,o.r);
     p.separation=clamp(o.r*model.length,200,1e6);p.angle=(angle*180/Math.PI+360)%360;
@@ -4492,20 +4512,29 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     reset(true);extent*=oldLength/model.length;velocityScale*=model.vunit/oldVelocity;draw();
   }
   svg.addEventListener(&#x27;pointerdown&#x27;,event=&gt;{
-    if(post)return;
+    if(post||dragCandidate||event.button!==0)return;
     const target=event.target.closest(&#x27;[data-drag]&#x27;);if(!target)return;
-    event.preventDefault();running=false;
-    if(time&gt;0) adoptCurrent();
-    const g=bodyGeometry();
-    drag={kind:target.dataset.drag,scale,cx,cy,velocityScale,g,model:{...model},state:[...state],extent};
-    svg.setPointerCapture(event.pointerId);setStatus();
+    event.preventDefault();
+    dragCandidate={id:event.pointerId,kind:target.dataset.drag,x:event.clientX,y:event.clientY};
+    svg.setPointerCapture(event.pointerId);
   });
   svg.addEventListener(&#x27;pointermove&#x27;,event=&gt;{
-    if(!drag)return;event.preventDefault();
-    const q=pointer(event),isA=drag.kind.endsWith(&#x27;A&#x27;),factor=isA?drag.g.fA:drag.g.fB;
+    if(post||dragCandidate?.id!==event.pointerId)return;
+    const dx=event.clientX-dragCandidate.x,dy=event.clientY-dragCandidate.y;
+    if(!drag){
+      if(Math.hypot(dx,dy)&lt;4)return;
+      running=false;
+      if(time&gt;0)adoptCurrent();
+      const bounds=svg.getBoundingClientRect(),isA=dragCandidate.kind.endsWith(&#x27;A&#x27;);
+      const factor=isA?p.m2/(p.m1+p.m2):-p.m1/(p.m1+p.m2);
+      drag={kind:dragCandidate.kind,positionX:w/(bounds.width*scale*factor),positionY:h/(bounds.height*scale*factor),
+        velocityX:w/(bounds.width*velocityScale*factor),velocityY:h/(bounds.height*velocityScale*factor),
+        model:{...model},state:[...state],extent,velocityScale};
+    }
+    event.preventDefault();
     let rx=drag.state[0],ry=drag.state[1],vx=drag.state[2],vy=drag.state[3];
-    if(drag.kind.startsWith(&#x27;position&#x27;)) {rx=(q[0]-drag.cx)/drag.scale/factor;ry=(drag.cy-q[1])/drag.scale/factor;}
-    else {const origin=isA?drag.g.A:drag.g.B;vx=(q[0]-origin[0])/drag.velocityScale/factor;vy=(origin[1]-q[1])/drag.velocityScale/factor;}
+    if(drag.kind.startsWith(&#x27;position&#x27;)) {rx+=dx*drag.positionX;ry-=dy*drag.positionY;}
+    else {vx+=dx*drag.velocityX;vy-=dy*drag.velocityY;}
     const r=Math.max(Math.hypot(rx,ry),1e-8),angle=Math.atan2(ry,rx),newLength=clamp(r*drag.model.length,200,1e6);
     const newModel=makeModel({...p,separation:newLength}),circle=PN.circularSpeed(newModel),vc=newModel.vunit*(Number.isFinite(circle)?circle:1),oldV=drag.model.vunit;
     p.separation=newLength;p.angle=(angle*180/Math.PI+360)%360;
@@ -4513,8 +4542,18 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     p.vt=clamp((-vx*Math.sin(angle)+vy*Math.cos(angle))*oldV/vc,-2,2);
     setPreset(&#x27;custom&#x27;);extent=drag.extent*drag.model.length/newLength;velocityScale=drag.velocityScale*newModel.vunit/oldV;reset(true);
   });
-  function endDrag(event) {if(!drag)return;drag=null;if(svg.hasPointerCapture(event.pointerId))svg.releasePointerCapture(event.pointerId);chartDirty=true;persist();}
-  svg.addEventListener(&#x27;pointerup&#x27;,endDrag);svg.addEventListener(&#x27;pointercancel&#x27;,endDrag);
+  function clearDragCapture() {
+    const id=dragCandidate?.id;
+    dragCandidate=null;drag=null;
+    if(id!==undefined&amp;&amp;svg.hasPointerCapture(id))svg.releasePointerCapture(id);
+  }
+  function endDrag(event) {
+    if(dragCandidate?.id!==event.pointerId)return;
+    const changed=!!drag;
+    clearDragCapture();
+    if(changed){chartDirty=true;persist();}
+  }
+  svg.addEventListener(&#x27;pointerup&#x27;,endDrag);svg.addEventListener(&#x27;pointercancel&#x27;,endDrag);svg.addEventListener(&#x27;lostpointercapture&#x27;,endDrag);
   function frame(now) {
     if(!root.isConnected) {cancelAnimationFrame(raf);observer.disconnect();themeObserver.disconnect();appearance.removeEventListener(&#x27;change&#x27;,onTheme);window.removeEventListener(&#x27;openai:set_globals&#x27;,restore);return;}
     const dt=Math.min(0.05,Math.max(0,(now-last)/1000));last=now;
@@ -4607,7 +4646,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     &lt;section class=&quot;em-view&quot; aria-label=&quot;可拖动的三体轨道&quot;&gt;
       &lt;div class=&quot;orbit-panel-heading&quot;&gt;&lt;h3&gt;轨道视图&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;三体质心参考系&lt;/span&gt;&lt;/div&gt;
       &lt;canvas class=&quot;em-orbit&quot; data-role=&quot;orbit&quot; role=&quot;img&quot; aria-label=&quot;三颗天体的质心系轨道。可拖动天体或小天体速度端点，滑块提供相同的键盘操作。&quot;&gt;中心 M、天体 A 与天体 B 的实际轨迹。&lt;/canvas&gt;
-      &lt;div class=&quot;em-legend text-small&quot;&gt;&lt;span&gt;&lt;i class=&quot;em-swatch&quot; style=&quot;background:var(--foreground)&quot;&gt;&lt;/i&gt;中心 M&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;em-swatch&quot; style=&quot;background:var(--viz-series-1)&quot;&gt;&lt;/i&gt;小天体 A&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;em-swatch&quot; style=&quot;background:var(--viz-series-2)&quot;&gt;&lt;/i&gt;小天体 B&lt;/span&gt;&lt;/div&gt;
+      &lt;div class=&quot;em-legend text-small&quot;&gt;&lt;span&gt;&lt;i class=&quot;em-swatch&quot; style=&quot;background:var(--foreground)&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;中心 M&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;em-swatch&quot; style=&quot;background:var(--viz-series-1)&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;小天体 A&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;em-swatch&quot; style=&quot;background:var(--viz-series-2)&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;小天体 B&lt;/span&gt;&lt;span&gt;&lt;i class=&quot;orbit-guide-swatch&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;初始开普勒参考&lt;/span&gt;&lt;/div&gt;
       &lt;div class=&quot;em-metrics tabular-nums&quot;&gt;&lt;span&gt;时间 &lt;output data-value=&quot;time&quot;&gt;&lt;/output&gt;&lt;/span&gt;&lt;span&gt;rA &lt;output data-value=&quot;rA&quot;&gt;&lt;/output&gt;&lt;/span&gt;&lt;span&gt;rB &lt;output data-value=&quot;rB&quot;&gt;&lt;/output&gt;&lt;/span&gt;&lt;/div&gt;
       &lt;div class=&quot;text-small tabular-nums&quot; data-value=&quot;ratios&quot;&gt;&lt;/div&gt;
       &lt;div class=&quot;em-status text-small&quot; data-role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
@@ -4679,6 +4718,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     &#x27;中心 M&#x27;:&#x27;Central body M&#x27;,
     &#x27;小天体 A&#x27;:&#x27;Body A&#x27;,
     &#x27;小天体 B&#x27;:&#x27;Body B&#x27;,
+    &#x27;初始开普勒参考&#x27;:&#x27;Initial Keplerian guides&#x27;,
     &#x27;时间&#x27;:&#x27;Time&#x27;,
     &#x27;三体总引力波时域与时频图&#x27;:&#x27;Time series and spectrogram of the combined gravitational wave&#x27;,
     &#x27;总引力波 · 时域&#x27;:&#x27;Combined wave · time series&#x27;,
@@ -4833,6 +4873,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     const style=getComputedStyle(root);
     return gw.colors={fg:color(&#x27;--foreground&#x27;),muted:color(&#x27;--muted-foreground&#x27;),border:color(&#x27;--border&#x27;),
       bg:color(&#x27;--background&#x27;),plus:color(&#x27;--viz-series-1&#x27;),cross:color(&#x27;--viz-series-2&#x27;),
+      guides:[color(&#x27;--orbit-guide-a&#x27;),color(&#x27;--orbit-guide-b&#x27;)],boundary:color(&#x27;--orbit-guide-boundary&#x27;),
       font:Math.max(11,parseFloat(style.fontSize)*0.86)+&#x27;px &#x27;+style.fontFamily};
   }
   function canvasFrame(name,height,right=18) {
@@ -4903,6 +4944,10 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     if(role(&#x27;gw-status&#x27;).textContent!==status)role(&#x27;gw-status&#x27;).textContent=status;
   }
   function persist(){window.orbitalToy?.save({emriParameters:{...p}},{emriPreset:role(&#x27;preset&#x27;).value,emriBody:role(&#x27;body&#x27;).value});}
+  function restorePresetLabel(key){
+    const matches=Object.hasOwn(presets,key)&amp;&amp;Object.entries(presets[key]).every(([name,value])=&gt;name===&#x27;speed&#x27;||name===&#x27;zoom&#x27;||p[name]===value);
+    role(&#x27;preset&#x27;).value=matches?key:&#x27;custom&#x27;;
+  }
   function describeSettings(){
     const radius=model.stopRadius+&#x27; G(M+mi)/c²&#x27;,speed=model.stopSpeed+&#x27;c&#x27;;
     const boundary=p.nearMerger
@@ -4946,7 +4991,17 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     $(&#x27;[data-action=&quot;step&quot;]&#x27;).disabled=running||!!stopped;
   }
   function referenceOrbits(){return [1,2].map(i=&gt;{const q=pairState(state,i),[x,y,vx,vy]=q,r=Math.hypot(x,y),mu=1+model.masses[i],hv=x*vy-y*vx,rv=x*vx+y*vy,v2=vx*vx+vy*vy;const ex=((v2-mu/r)*x-rv*vx)/mu,ey=((v2-mu/r)*y-rv*vy)/mu,e=Math.hypot(ex,ey),angle=e&gt;1e-8?Math.atan2(ey,ex):Math.atan2(y,x),pts=[];if(e&gt;=0.98||Math.abs(hv)&lt;1e-8)return pts;for(let k=0;k&lt;=150;k++){const f=TAU*k/150,rr=hv*hv/mu/(1+e*Math.cos(f));pts.push([state[0]+rr*Math.cos(f+angle),state[1]+rr*Math.sin(f+angle)]);}return pts;});}
-  function reset(keepView=false){running=false;slow=false;model=makeModel(p);state=initial(p,model);time=0;stopped=stopReason(state,model);e0=energy(state,model);trail=[state.slice()];reference=referenceOrbits();if(!keepView)extent=Math.max(p.rA,p.rB)*1.2;GW_INITIAL_DT=model.period/256;GW_VIEW=8*model.period;resetWave();syncControls();chartDirty=true;draw();}
+  function reset(keepView=false){
+    running=false;slow=false;model=makeModel(p);state=initial(p,model);time=0;stopped=stopReason(state,model);
+    e0=energy(state,model);trail=[state.slice()];reference=referenceOrbits();
+    if(!keepView){
+      clearDrag();
+      const startExtent=Math.max(p.rA,p.rB);
+      const guides=reference.map(points=&gt;points.reduce((max,[x,y])=&gt;Math.max(max,Math.hypot(x,y)),0));
+      extent=1.2*Math.max(startExtent,...guides.filter(radius=&gt;radius&lt;=2*startExtent));
+    }
+    GW_INITIAL_DT=model.period/256;GW_VIEW=8*model.period;resetWave();syncControls();chartDirty=true;draw();
+  }
   function advance(duration){let left=duration,n=0;while(left&gt;1e-9&amp;&amp;!stopped&amp;&amp;n&lt;4000){const localDt=localStep(state,model);refineWaveSampling(localDt);if(gw.next-time&lt;1e-9){sampleWave();gw.next=time+gw.dt;}const dt=Math.min(left,localDt,gw.next-time),next=rk4(state,dt,model),reason=stopReason(next,model);if(!next.every(Number.isFinite)){stopped=reason;break;}state=next;time+=dt;left-=dt;n++;if(time&gt;=gw.next-1e-9){sampleWave();gw.next+=gw.dt;}if(n%3===0||left&lt;1e-9||reason)trail.push(state.slice());if(reason)stopped=reason;}if(trail.length&gt;2200)trail.splice(0,trail.length-2200);trimWave();slow=left&gt;1e-6&amp;&amp;n&gt;=4000;if(stopped)running=false;chartDirty=true;gw.dirty=true;}
   function xy(x,y){return [cx+x*scale,cy-y*scale];}
   function geometry(){return [0,1,2].map(i=&gt;{const pos=xy(state[4*i],state[4*i+1]);return {pos,tip:[pos[0]+state[4*i+2]*velocityScale,pos[1]-state[4*i+3]*velocityScale]};});}
@@ -4954,19 +5009,20 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     if(root.hidden)return;
     w=Math.max(250,canvas.getBoundingClientRect().width);h=root.getBoundingClientRect().width&gt;=760?440:340;canvas.style.height=h+&#x27;px&#x27;;
     const dpr=Math.min(devicePixelRatio||1,2);if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
-    if(!drag)extent=Math.max(extent,...[0,1,2].map(i=&gt;Math.hypot(state[4*i],state[4*i+1])*1.12));
+    if(!drag?.state)extent=Math.max(extent,...[0,1,2].map(i=&gt;Math.hypot(state[4*i],state[4*i+1])*1.12));
     scale=Math.min(w-42,h-76)/(2*extent)*p.zoom;cx=w/2;cy=h/2;velocityScale=scale*0.35*Math.sqrt(Math.min(p.rA,p.rB)**3);
-    const ctx=canvas.getContext(&#x27;2d&#x27;),colors=gwColors();ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);ctx.font=colors.font;ctx.lineWidth=1;ctx.strokeStyle=colors.border;ctx.strokeRect(1,1,w-2,h-2);ctx.fillStyle=colors.fg;ctx.fillText(t(&#x27;拖动三颗天体 / A、B 的速度端点&#x27;,&#x27;Drag a body or the A/B velocity handles&#x27;),12,23,w-24);
+    const ctx=canvas.getContext(&#x27;2d&#x27;),colors=gwColors();ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,w,h);ctx.font=colors.font;ctx.lineWidth=1;ctx.strokeStyle=colors.border;ctx.strokeRect(1,1,w-2,h-2);ctx.fillStyle=colors.fg;ctx.fillText(t(&#x27;点选 A 或 B · 拖动天体或速度端点&#x27;,&#x27;Select A or B · Drag a body or velocity handle&#x27;),12,23,w-24);
     ctx.save();ctx.beginPath();ctx.rect(2,34,w-4,h-66);ctx.clip();ctx.strokeStyle=colors.border;ctx.beginPath();ctx.moveTo(cx,34);ctx.lineTo(cx,h-32);ctx.moveTo(8,cy);ctx.lineTo(w-8,cy);ctx.stroke();
-    for(const points of reference){ctx.setLineDash([4,5]);ctx.beginPath();points.forEach((s,i)=&gt;{const q=xy(...s);if(i===0)ctx.moveTo(...q);else ctx.lineTo(...q);});ctx.stroke();}ctx.setLineDash([]);
+    ctx.lineWidth=2;ctx.setLineDash([6,4]);
+    reference.forEach((points,body)=&gt;{ctx.strokeStyle=colors.guides[body];ctx.beginPath();points.forEach((s,i)=&gt;{const q=xy(...s);if(i===0)ctx.moveTo(...q);else ctx.lineTo(...q);});ctx.stroke();});
+    ctx.setLineDash([]);
     const bodyColors=[colors.fg,colors.plus,colors.cross],g=geometry();
     for(let i=0;i&lt;3;i++){ctx.strokeStyle=bodyColors[i];ctx.globalAlpha=i===0?0.35:0.65;ctx.lineWidth=1.6;ctx.beginPath();trail.forEach((s,k)=&gt;{const q=xy(s[4*i],s[4*i+1]);if(k===0)ctx.moveTo(...q);else ctx.lineTo(...q);});ctx.stroke();}ctx.globalAlpha=1;
-    ctx.strokeStyle=colors.muted;ctx.lineWidth=1;ctx.setLineDash([3,5]);ctx.beginPath();ctx.arc(...g[0].pos,model.stopRadius*scale,0,TAU);ctx.stroke();ctx.setLineDash([]);
+    ctx.strokeStyle=colors.boundary;ctx.lineWidth=1;ctx.setLineDash([3,5]);ctx.beginPath();ctx.arc(...g[0].pos,model.stopRadius*scale,0,TAU);ctx.stroke();ctx.setLineDash([]);
     for(let i=0;i&lt;3;i++){const {pos,tip}=g[i],radius=i===0?12:8;ctx.fillStyle=i===0?colors.bg:bodyColors[i];ctx.strokeStyle=bodyColors[i];ctx.lineWidth=2;ctx.beginPath();ctx.arc(...pos,radius,0,TAU);ctx.fill();ctx.stroke();ctx.fillStyle=colors.fg;ctx.fillText([&#x27;M&#x27;,&#x27;A&#x27;,&#x27;B&#x27;][i],pos[0]+radius+5,pos[1]-radius-3);if(i){const angle=Math.atan2(tip[1]-pos[1],tip[0]-pos[0]);ctx.lineWidth=1.3;ctx.beginPath();ctx.moveTo(...pos);ctx.lineTo(...tip);ctx.moveTo(tip[0]-6*Math.cos(angle-0.5),tip[1]-6*Math.sin(angle-0.5));ctx.lineTo(...tip);ctx.lineTo(tip[0]-6*Math.cos(angle+0.5),tip[1]-6*Math.sin(angle+0.5));ctx.stroke();ctx.fillStyle=colors.bg;ctx.beginPath();ctx.arc(...tip,5,0,TAU);ctx.fill();ctx.stroke();}}
     ctx.restore();ctx.fillStyle=colors.muted;
     const cutoff=model.stopRadius+&#x27; r_g&#x27;;
-    const orbitCaption=w&lt;360?t(&#x27;初始轨道 / 约 &#x27;+cutoff+&#x27; 截止圈&#x27;,&#x27;Initial orbits / cutoff near &#x27;+cutoff):
-      t(&#x27;虚线：初始牛顿轨道；中心圈：约 &#x27;+cutoff+&#x27; 截止&#x27;,&#x27;Dashed: initial Newtonian orbits · central ring: cutoff near &#x27;+cutoff);
+    const orbitCaption=t(&#x27;中心截止圈 ≈ &#x27;+cutoff,&#x27;Central cutoff ring ≈ &#x27;+cutoff);
     ctx.fillText(orbitCaption,12,h-13,w-24);
     const a=pairInfo(state,1,model),b=pairInfo(state,2,model);out(&#x27;time&#x27;,fmt(time*model.tunit/3600,3)+&#x27; h&#x27;);out(&#x27;rA&#x27;,fmt(a.r,1)+&#x27; r_g&#x27;);out(&#x27;rB&#x27;,fmt(b.r,1)+&#x27; r_g&#x27;);out(&#x27;ratios&#x27;,&#x27;mA/M = &#x27;+model.masses[1].toExponential(1)+t(&#x27;；&#x27;,&#x27; · &#x27;)+&#x27;mB/M = &#x27;+model.masses[2].toExponential(1));
     out(&#x27;scale&#x27;,&#x27;1 r_g = &#x27;+fmt(model.length,0)+&#x27; km&#x27;);
@@ -4983,15 +5039,59 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   for(const el of root.querySelectorAll(&#x27;[data-body-number]&#x27;))el.addEventListener(&#x27;change&#x27;,()=&gt;{edit(el.dataset.bodyNumber+role(&#x27;body&#x27;).value,el.value.trim()===&#x27;&#x27;?NaN:Number(el.value));persist();});
   role(&#x27;body&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{syncControls();persist();});
   for(const key of [&#x27;pn&#x27;,&#x27;radiation&#x27;,&#x27;nearMerger&#x27;])role(key).addEventListener(&#x27;change&#x27;,()=&gt;{p[key]=role(key).checked;role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();persist();});
-  role(&#x27;preset&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{if(presets[role(&#x27;preset&#x27;).value]){p={...presets[role(&#x27;preset&#x27;).value],nearMerger:p.nearMerger};reset();persist();}});
+  role(&#x27;preset&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;{const key=role(&#x27;preset&#x27;).value;if(Object.hasOwn(presets,key)){p={...presets[key]};reset();persist();}});
   play.addEventListener(&#x27;click&#x27;,()=&gt;{running=!running;last=performance.now();draw();});$(&#x27;[data-action=&quot;restart&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;reset());$(&#x27;[data-action=&quot;step&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{advance(model.period/100);draw();});
   function pointer(e){const r=canvas.getBoundingClientRect();return [(e.clientX-r.left)*w/r.width,(e.clientY-r.top)*h/r.height];}
   function adopt(s){const m=model;for(let i=1;i&lt;=2;i++){const b=i===1?&#x27;A&#x27;:&#x27;B&#x27;,[x,y,vx,vy]=pairState(s,i),r=Math.hypot(x,y),vc=Math.sqrt((1+m.masses[i])/r);p[&#x27;r&#x27;+b]=clamp(r,...limits[&#x27;r&#x27;+b]);p[&#x27;phase&#x27;+b]=(Math.atan2(y,x)*180/Math.PI+360)%360;p[&#x27;vr&#x27;+b]=clamp((x*vx+y*vy)/r/vc,-1.5,1.5);p[&#x27;vt&#x27;+b]=clamp((x*vy-y*vx)/r/vc,-1.5,1.5);}role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset(true);}
-  canvas.addEventListener(&#x27;pointerdown&#x27;,e=&gt;{const q=pointer(e),g=geometry(),hits=[];for(let i=0;i&lt;3;i++){hits.push({i,kind:&#x27;position&#x27;,d:Math.hypot(q[0]-g[i].pos[0],q[1]-g[i].pos[1])});if(i)hits.push({i,kind:&#x27;velocity&#x27;,d:Math.hypot(q[0]-g[i].tip[0],q[1]-g[i].tip[1])});}hits.sort((a,b)=&gt;a.d-b.d);if(hits[0].d&gt;23)return;e.preventDefault();running=false;if(time&gt;0)adopt(state);draw();drag={...hits[0],state:state.slice(),g:geometry(),scale,cx,cy,velocityScale};if(drag.i)role(&#x27;body&#x27;).value=drag.i===1?&#x27;A&#x27;:&#x27;B&#x27;;canvas.setPointerCapture(e.pointerId);syncControls();setStatus();});
-  canvas.addEventListener(&#x27;pointermove&#x27;,e=&gt;{if(!drag)return;e.preventDefault();const q=pointer(e),s=drag.state.slice(),k=4*drag.i;if(drag.kind===&#x27;position&#x27;){s[k]=(q[0]-drag.cx)/drag.scale;s[k+1]=(drag.cy-q[1])/drag.scale;}else{s[k+2]=(q[0]-drag.g[drag.i].pos[0])/drag.velocityScale;s[k+3]=(drag.g[drag.i].pos[1]-q[1])/drag.velocityScale;}adopt(recenter(s,model));});
-  function endDrag(e){if(!drag)return;drag=null;if(canvas.hasPointerCapture(e.pointerId))canvas.releasePointerCapture(e.pointerId);persist();chartDirty=true;}
-  canvas.addEventListener(&#x27;pointerup&#x27;,endDrag);canvas.addEventListener(&#x27;pointercancel&#x27;,endDrag);
+  canvas.addEventListener(&#x27;pointerdown&#x27;,e=&gt;{
+    if(drag||e.button!==0)return;
+    const q=pointer(e),g=geometry(),hits=[];
+    for(let i=0;i&lt;3;i++){
+      hits.push({i,kind:&#x27;position&#x27;,d:Math.hypot(q[0]-g[i].pos[0],q[1]-g[i].pos[1])});
+      if(i)hits.push({i,kind:&#x27;velocity&#x27;,d:Math.hypot(q[0]-g[i].tip[0],q[1]-g[i].tip[1])});
+    }
+    hits.sort((a,b)=&gt;a.d-b.d);
+    const {i,kind,d}=hits[0];
+    if(d&gt;23)return;
+    e.preventDefault();
+    drag={i,kind,id:e.pointerId,x:e.clientX,y:e.clientY};
+    canvas.setPointerCapture(e.pointerId);
+  });
+  canvas.addEventListener(&#x27;pointermove&#x27;,e=&gt;{
+    if(!drag||drag.id!==e.pointerId)return;
+    const dx=e.clientX-drag.x,dy=e.clientY-drag.y;
+    if(!drag.state){
+      if(Math.hypot(dx,dy)&lt;4)return;
+      running=false;
+      const bounds=canvas.getBoundingClientRect(),units=drag.kind===&#x27;position&#x27;?scale:velocityScale;
+      Object.assign(drag,{state:state.slice(),xScale:w/(bounds.width*units),yScale:h/(bounds.height*units)});
+      if(drag.i)role(&#x27;body&#x27;).value=drag.i===1?&#x27;A&#x27;:&#x27;B&#x27;;
+    }
+    e.preventDefault();
+    const next=drag.state.slice(),k=4*drag.i+(drag.kind===&#x27;position&#x27;?0:2);
+    next[k]+=dx*drag.xScale;
+    next[k+1]-=dy*drag.yScale;
+    adopt(recenter(next,model));
+  });
+  function clearDrag(){
+    if(!drag)return;
+    const {id}=drag;
+    drag=null;
+    if(canvas.hasPointerCapture(id))canvas.releasePointerCapture(id);
+  }
+  function endDrag(e){
+    if(!drag||drag.id!==e.pointerId)return;
+    const {i,state:draggedState}=drag;
+    clearDrag();
+    if(draggedState){persist();chartDirty=true;return;}
+    if(i&amp;&amp;e.type===&#x27;pointerup&#x27;){
+      role(&#x27;body&#x27;).value=i===1?&#x27;A&#x27;:&#x27;B&#x27;;
+      syncControls();persist();
+    }
+  }
+  for(const event of [&#x27;pointerup&#x27;,&#x27;pointercancel&#x27;,&#x27;lostpointercapture&#x27;])canvas.addEventListener(event,endDrag);
   function onTheme(){gw.colors=null;gw.dirty=true;chartDirty=true;if(!root.hidden)draw();}
+  document.addEventListener(&#x27;DOMContentLoaded&#x27;,onTheme,{once:true});
   const themeObserver=new MutationObserver(onTheme);themeObserver.observe(document.documentElement,{attributes:true,attributeFilter:[&#x27;class&#x27;,&#x27;style&#x27;,&#x27;data-theme&#x27;]});themeObserver.observe(document.body,{attributes:true,attributeFilter:[&#x27;class&#x27;,&#x27;style&#x27;,&#x27;data-theme&#x27;]});const appearance=matchMedia(&#x27;(prefers-color-scheme: dark)&#x27;);appearance.addEventListener(&#x27;change&#x27;,onTheme);
   const observer=new ResizeObserver(()=&gt;{chartDirty=true;gw.dirty=true;if(!root.hidden)draw();});observer.observe(root);
   for(const b of root.querySelectorAll(&#x27;[data-series]&#x27;))b.addEventListener(&#x27;click&#x27;,()=&gt;{const key=b.dataset.series;gw.visible[key]=!gw.visible[key];b.setAttribute(&#x27;aria-pressed&#x27;,String(gw.visible[key]));gw.dirty=true;drawGW(true);});
@@ -5003,9 +5103,9 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
     else draw();
   };
   document.addEventListener(&#x27;orbital-language&#x27;,onLanguage);
-  window.addEventListener(&#x27;openai:set_globals&#x27;,e=&gt;{const saved=e.detail?.globals?.widgetState?.modelContent?.emriParameters;if(!saved)return;const next=clean(saved);if(Object.keys(defaults).every(k=&gt;next[k]===p[k]))return;p=next;reset();});
+  window.addEventListener(&#x27;openai:set_globals&#x27;,e=&gt;{const widget=e.detail?.globals?.widgetState,saved=widget?.modelContent?.emriParameters;if(!saved)return;const next=clean(saved);if(Object.keys(defaults).every(k=&gt;next[k]===p[k]))return;p=next;restorePresetLabel(widget.privateContent?.emriPreset??role(&#x27;preset&#x27;).value);reset();});
   function frame(now){if(!root.isConnected){observer.disconnect();themeObserver.disconnect();appearance.removeEventListener(&#x27;change&#x27;,onTheme);document.removeEventListener(&#x27;orbital-language&#x27;,onLanguage);return;}const dt=Math.min(0.05,Math.max(0,(now-last)/1000));last=now;if(!root.hidden&amp;&amp;!document.hidden){if(running)advance(dt*p.speed*model.period);if(chartDirty&amp;&amp;(now-lastOrbitDraw&gt;30||!running)){draw();lastOrbitDraw=now;}}raf=requestAnimationFrame(frame);}
-  const saved=window.orbitalToy?.privateContent;if(window.orbitalToy?.modelContent?.emriParameters)role(&#x27;preset&#x27;).value=saved?.emriPreset in presets?saved.emriPreset:&#x27;custom&#x27;;if(saved?.emriBody===&#x27;B&#x27;)role(&#x27;body&#x27;).value=&#x27;B&#x27;;reset();raf=requestAnimationFrame(frame);
+  const saved=window.orbitalToy?.privateContent;if(window.orbitalToy?.modelContent?.emriParameters)restorePresetLabel(saved?.emriPreset);if(saved?.emriBody===&#x27;B&#x27;)role(&#x27;body&#x27;).value=&#x27;B&#x27;;reset();raf=requestAnimationFrame(frame);
   window.OrbitFavorites.attach({root,mode:&#x27;emri&#x27;,read:()=&gt;({...p}),load:values=&gt;{p=clean(values);role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();persist();},describe:values=&gt;{const q=clean(values);return &#x27;M = &#x27;+fmt(q.centralMass)+&#x27; M☉ · A / B = &#x27;+fmt(q.massA)+&#x27; / &#x27;+fmt(q.massB)+&#x27; M☉ · rA / rB = &#x27;+fmt(q.rA,1)+&#x27; / &#x27;+fmt(q.rB,1)+&#x27; r_g&#x27;;}});
 })();
 window.orbitalToy?.show(window.orbitalToy.mode);
@@ -5028,6 +5128,7 @@ window.orbitalToy?.show(window.orbitalToy.mode);
 #schwarzschild-sandbox .sg-pair { display:grid;grid-template-columns:minmax(50px,1fr) 96px;gap:10px;align-items:center; }
 #schwarzschild-sandbox .sg-label { display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 8px; }
 #schwarzschild-sandbox .sg-legend { display:flex;flex-wrap:wrap;gap:12px;margin:6px 0; }
+#schwarzschild-sandbox .sg-legend[hidden], #schwarzschild-sandbox .sg-legend [hidden] { display:none; }
 #schwarzschild-sandbox .sg-diagnostics { display:flex;flex-wrap:wrap;gap:8px 20px;margin:8px 0; }
 #schwarzschild-sandbox .sg-status { min-height:24px; }
 @media(max-width:759px){#schwarzschild-sandbox .sg-stage { grid-template-columns:1fr;gap:18px; }#schwarzschild-sandbox .sg-orbit { height:340px; }}
@@ -5044,8 +5145,13 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   &lt;div class=&quot;sg-stage&quot;&gt;
     &lt;section aria-label=&quot;Schwarzschild 轨道与状态&quot;&gt;
       &lt;div class=&quot;orbit-panel-heading&quot;&gt;&lt;h3&gt;轨道视图&lt;/h3&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;Schwarzschild 坐标投影&lt;/span&gt;&lt;/div&gt;
-      &lt;canvas class=&quot;sg-orbit&quot; data-role=&quot;orbit&quot; role=&quot;img&quot; aria-label=&quot;Schwarzschild 坐标平面中的轨道。拖动小天体改变初始尺度与方位；参数框支持键盘操作。&quot;&gt;测地线轨道、事件视界投影与近远心点参考圈。&lt;/canvas&gt;
-      &lt;div class=&quot;sg-legend text-small&quot;&gt;&lt;span&gt;实线：轨迹&lt;/span&gt;&lt;span class=&quot;text-muted&quot;&gt;虚线：近 / 远心点半径；中央圈：r = 2 r_g&lt;/span&gt;&lt;/div&gt;
+      &lt;canvas class=&quot;sg-orbit&quot; data-role=&quot;orbit&quot; role=&quot;img&quot; aria-describedby=&quot;sg-orbit-legend&quot; aria-label=&quot;Schwarzschild 坐标平面中的轨道。拖动小天体改变初始尺度与方位；参数框支持键盘操作。&quot;&gt;测地线轨迹、初始参考轨道与事件视界的坐标投影。&lt;/canvas&gt;
+      &lt;div id=&quot;sg-orbit-legend&quot; class=&quot;sg-legend text-small&quot; data-role=&quot;orbit-legend&quot;&gt;
+        &lt;span&gt;实线轨迹&lt;/span&gt;
+        &lt;span&gt;&lt;i class=&quot;orbit-guide-swatch&quot; aria-hidden=&quot;true&quot; style=&quot;--guide-color:var(--orbit-guide-a)&quot;&gt;&lt;/i&gt;&lt;span data-role=&quot;reference-label&quot;&gt;&lt;/span&gt;&lt;/span&gt;
+        &lt;span class=&quot;text-muted&quot; data-role=&quot;turning-legend&quot;&gt;&lt;i class=&quot;orbit-guide-swatch&quot; aria-hidden=&quot;true&quot; style=&quot;--guide-color:var(--orbit-guide-boundary)&quot;&gt;&lt;/i&gt;近／远心点半径&lt;/span&gt;
+        &lt;span class=&quot;text-muted&quot;&gt;视界投影 r = 2 r_g&lt;/span&gt;
+      &lt;/div&gt;
       &lt;div class=&quot;sg-readouts&quot;&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;坐标时间 t (h)&lt;/span&gt;&lt;output data-value=&quot;time&quot;&gt;0.0000&lt;/output&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;固有时间 τ (h)&lt;/span&gt;&lt;output data-value=&quot;proper&quot;&gt;0.0000&lt;/output&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;半径 r / r_g&lt;/span&gt;&lt;output data-value=&quot;radius&quot;&gt;—&lt;/output&gt;&lt;/span&gt;&lt;/div&gt;
       &lt;div class=&quot;sg-status text-small&quot; data-role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
       &lt;div class=&quot;sg-diagnostics text-small tabular-nums&quot;&gt;&lt;span data-value=&quot;precession&quot;&gt;&lt;/span&gt;&lt;span data-value=&quot;frequencies&quot;&gt;&lt;/span&gt;&lt;/div&gt;
@@ -5106,9 +5212,10 @@ window.orbitalToy?.show(window.orbitalToy.mode);
     &#x27;轨道视图&#x27;:&#x27;Orbit view&#x27;,
     &#x27;Schwarzschild 坐标投影&#x27;:&#x27;Schwarzschild coordinate projection&#x27;,
     &#x27;Schwarzschild 坐标平面中的轨道。拖动小天体改变初始尺度与方位；参数框支持键盘操作。&#x27;:&#x27;Orbit projected onto the Schwarzschild coordinate plane. Drag the small body to change the initial orbital scale and azimuth. The parameter controls support keyboard input.&#x27;,
-    &#x27;测地线轨道、事件视界投影与近远心点参考圈。&#x27;:&#x27;Geodesic orbit, projected event horizon, and turning-point reference circles.&#x27;,
-    &#x27;实线：轨迹&#x27;:&#x27;Solid line · trajectory&#x27;,
-    &#x27;虚线：近 / 远心点半径；中央圈：r = 2 r_g&#x27;:&#x27;Dashed circles · periapsis and apoapsis. Inner circle · r = 2 r_g&#x27;,
+    &#x27;测地线轨迹、初始参考轨道与事件视界的坐标投影。&#x27;:&#x27;Coordinate projection of the geodesic trajectory, initial orbit guide, and event horizon.&#x27;,
+    &#x27;实线轨迹&#x27;:&#x27;Solid trajectory&#x27;,
+    &#x27;近／远心点半径&#x27;:&#x27;Turning radii&#x27;,
+    &#x27;视界投影 r = 2 r_g&#x27;:&#x27;Projected horizon r = 2 r_g&#x27;,
     &#x27;坐标时间 t (h)&#x27;:&#x27;Coordinate time t (h)&#x27;,
     &#x27;固有时间 τ (h)&#x27;:&#x27;Proper time τ (h)&#x27;,
     &#x27;半径 r / r_g&#x27;:&#x27;Radius r / r_g&#x27;,
@@ -5159,8 +5266,8 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   const gw={samples:[],buffer:[],columns:[],dt:1,next:1,hop:0,size:512};
   const spectral=SP.attach(root,&#x27;geodesicSpectrum&#x27;,rebuild=&gt;{if(rebuild)rebuildSpectrum();dirty=true;draw();});
   const fourier=window.OrbitFourier.attach(root);
-  let colorCache=null;
-  function colors(){if(colorCache)return colorCache;const probe=document.createElement(&#x27;span&#x27;);root.append(probe);const read=name=&gt;{probe.style.color=&#x27;var(&#x27;+name+&#x27;)&#x27;;return getComputedStyle(probe).color;};colorCache={fg:read(&#x27;--foreground&#x27;),bg:read(&#x27;--background&#x27;),muted:read(&#x27;--muted-foreground&#x27;),border:read(&#x27;--border&#x27;),plus:read(&#x27;--viz-series-1&#x27;),cross:read(&#x27;--viz-series-2&#x27;)};probe.remove();return colorCache;}
+  let colorCache=null,guideKey=&#x27;&#x27;,guidePoints=[];
+  function colors(){if(colorCache)return colorCache;const probe=document.createElement(&#x27;span&#x27;);root.append(probe);const read=(name,fallback=name)=&gt;{probe.style.color=&#x27;var(&#x27;+name+&#x27;,var(&#x27;+fallback+&#x27;))&#x27;;return getComputedStyle(probe).color;};colorCache={fg:read(&#x27;--foreground&#x27;),bg:read(&#x27;--background&#x27;),muted:read(&#x27;--muted-foreground&#x27;),border:read(&#x27;--border&#x27;),plus:read(&#x27;--viz-series-1&#x27;),cross:read(&#x27;--viz-series-2&#x27;),guide:read(&#x27;--orbit-guide-a&#x27;,&#x27;--viz-series-1&#x27;),boundary:read(&#x27;--orbit-guide-boundary&#x27;,&#x27;--muted-foreground&#x27;)};probe.remove();return colorCache;}
   function canvas(name,height,right=18){const el=role(name),width=Math.max(250,el.getBoundingClientRect().width),dpr=Math.min(devicePixelRatio||1,2);el.style.height=height+&#x27;px&#x27;;if(el.width!==Math.round(width*dpr)||el.height!==Math.round(height*dpr)){el.width=Math.round(width*dpr);el.height=Math.round(height*dpr);}const ctx=el.getContext(&#x27;2d&#x27;);ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,width,height);ctx.font=getComputedStyle(root).font;const box={x:62,y:25,width:width-62-right,height:height-62},end=Math.max(8*(m.period||1),time),start=Math.max(0,end-8*(m.period||1));return {canvas:el,ctx,box,width,height,colors:colors(),start,end,x:t=&gt;box.x+(t-start)/(end-start)*box.width};}
   function number(v){return v!==0&amp;&amp;(Math.abs(v)&lt;0.001||Math.abs(v)&gt;1e5)?v.toExponential(1):fmt(v,Math.abs(v)&lt;1?3:2);}
   function axes(plot,min,max,ylabel){const {ctx,box,colors:co,x,start,end,width,height}=plot;ctx.fillStyle=co.fg;ctx.textAlign=&#x27;left&#x27;;ctx.fillText(ylabel,8,15);ctx.strokeStyle=co.border;for(let i=0;i&lt;3;i++){const y=box.y+box.height*(1-i/2);ctx.beginPath();ctx.moveTo(box.x,y);ctx.lineTo(box.x+box.width,y);ctx.stroke();ctx.fillStyle=co.muted;ctx.textAlign=&#x27;right&#x27;;ctx.fillText(number(min+(max-min)*i/2),box.x-6,y+4);}const ticks=width&lt;360?2:3;for(let i=0;i&lt;=ticks;i++){const tickTime=start+(end-start)*i/ticks;ctx.textAlign=i===0?&#x27;left&#x27;:i===ticks?&#x27;right&#x27;:&#x27;center&#x27;;ctx.fillText(number(tickTime*m.tunit/3600),x(tickTime),box.y+box.height+17);}ctx.strokeRect(box.x,box.y,box.width,box.height);ctx.fillStyle=co.fg;ctx.textAlign=&#x27;center&#x27;;ctx.fillText(t(&#x27;时间 t (h)&#x27;,&#x27;Time t (h)&#x27;),box.x+box.width/2,height-2);}
@@ -5192,6 +5299,9 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   }
   function sync(){
     role(&#x27;emri-preset-note&#x27;).hidden=role(&#x27;preset&#x27;).value!==&#x27;emri&#x27;;
+    role(&#x27;orbit-legend&#x27;).hidden=!m.valid;
+    role(&#x27;reference-label&#x27;).textContent=p.e===0?t(&#x27;初始圆轨道&#x27;,&#x27;Initial circular orbit&#x27;):
+      t(&#x27;初始测地线 · 1 个径向周期&#x27;,&#x27;Initial geodesic · one radial period&#x27;);
     for(const el of root.querySelectorAll(&#x27;[data-key]&#x27;)){
       const key=el.dataset.key;
       el.value=[&#x27;mass&#x27;,&#x27;speed&#x27;].includes(key)?Math.log10(p[key]):p[key];
@@ -5217,7 +5327,42 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   }
   function reset(){running=false;time=0;m={...GR.make(p.p,p.e),tunit:GM*p.mass/C**3,length:GM*p.mass/C**2};state=[p.chi*Math.PI/180,p.angle*Math.PI/180,0];trail=[];gw.samples=[];SP.resetUniformStft(gw);spectral.clearCache();gw.size=spectral.size();if(m.valid){gw.dt=Math.min(m.period/256,TAU/m.maxOmega/64);gw.next=gw.dt;const q=GR.point(state,m);trail.push([q.x,q.y]);sample();}sync();dirty=true;draw();}
   function advance(duration){if(!m.valid)return;const end=time+duration;let n=0;while(time&lt;end-1e-9&amp;&amp;n++&lt;5000){const q=GR.point(state,m),dc=GR.rates(state[0],m.p,m.e)[0],dt=Math.min(end-time,gw.next-time,0.012/Math.max(dc,q.omega));state=GR.step(state,dt,m);time+=dt;if(time&gt;=gw.next-1e-8){sample();gw.next+=gw.dt;}const next=GR.point(state,m);trail.push([next.x,next.y]);}if(trail.length&gt;5000)trail.splice(0,trail.length-5000);SP.trimHistory(gw,keepWaveAfter());dirty=true;}
-  function drawOrbit(){const plot=canvas(&#x27;orbit&#x27;,root.getBoundingClientRect().width&gt;=760?440:340),{ctx,width,height,colors:co}=plot;ctx.strokeStyle=co.border;ctx.strokeRect(0.5,0.5,width-1,height-1);ctx.fillStyle=co.muted;ctx.textAlign=&#x27;left&#x27;;ctx.fillText(t(&#x27;拖动小天体 · 坐标轨道投影&#x27;,&#x27;Drag the small body · Coordinate projection&#x27;),12,22);if(!m.valid){geometry=null;return;}const q=GR.point(state,m),scale=Math.min(width-40,height-60)/(2*m.ra*1.08),cx=width/2,cy=height/2+8;const xy=(x,y)=&gt;[cx+x*scale,cy-y*scale];ctx.setLineDash([4,5]);ctx.strokeStyle=co.border;for(const r of [m.rp,m.ra]){ctx.beginPath();ctx.arc(cx,cy,r*scale,0,TAU);ctx.stroke();}ctx.setLineDash([]);ctx.fillStyle=co.bg;ctx.strokeStyle=co.muted;ctx.beginPath();ctx.arc(cx,cy,2*scale,0,TAU);ctx.fill();ctx.stroke();ctx.strokeStyle=co.plus;ctx.lineWidth=1.6;ctx.beginPath();trail.forEach((v,i)=&gt;{const a=xy(...v);i?ctx.lineTo(...a):ctx.moveTo(...a);});ctx.stroke();const pos=xy(q.x,q.y);ctx.fillStyle=co.plus;ctx.beginPath();ctx.arc(...pos,7,0,TAU);ctx.fill();ctx.lineWidth=1;ctx.fillStyle=co.muted;ctx.textAlign=&#x27;left&#x27;;ctx.fillText(&#x27;rₚ = &#x27;+fmt(m.rp,2)+&#x27; / rₐ = &#x27;+fmt(m.ra,2)+&#x27; r_g&#x27;,12,height-12);geometry={...plot,pos,cx,cy,scale};plot.canvas.dataset.radius=String(q.r);plot.canvas.dataset.phi=String(state[1]);plot.canvas.dataset.chi=String(state[0]);}
+  function drawOrbit(){
+    const plot=canvas(&#x27;orbit&#x27;,root.getBoundingClientRect().width&gt;=760?440:340),{ctx,width,height,colors:co}=plot;
+    ctx.strokeStyle=co.border;ctx.strokeRect(0.5,0.5,width-1,height-1);
+    if(!m.valid){geometry=null;return;}
+    ctx.fillStyle=co.muted;ctx.textAlign=&#x27;left&#x27;;ctx.fillText(t(&#x27;拖动小天体&#x27;,&#x27;Drag the small body&#x27;),12,22);
+    const q=GR.point(state,m),scale=Math.min(width-40,height-60)/(2*m.ra*1.08),cx=width/2,cy=height/2+8;
+    const xy=(x,y)=&gt;[cx+x*scale,cy-y*scale];
+    const circle=radius=&gt;{ctx.beginPath();ctx.arc(cx,cy,radius*scale,0,TAU);};
+    const path=points=&gt;{ctx.beginPath();points.forEach(([x,y],i)=&gt;{const pos=xy(x,y);if(i)ctx.lineTo(...pos);else ctx.moveTo(...pos);});};
+    const turningVisible=(m.ra-m.rp)*scale&gt;=3;
+    role(&#x27;turning-legend&#x27;).hidden=!turningVisible;
+    if(turningVisible){
+      ctx.strokeStyle=co.boundary;ctx.setLineDash([2,5]);
+      for(const radius of [m.rp,m.ra]){circle(radius);ctx.stroke();}
+    }
+    ctx.strokeStyle=co.guide;ctx.lineWidth=2;ctx.setLineDash([6,4]);
+    if(m.e===0)circle(m.p);
+    else {
+      const key=[p.p,p.e,p.chi,p.angle].join(&#x27;/&#x27;);
+      if(key!==guideKey){
+        guidePoints=GR.referencePath(p.chi*Math.PI/180,p.angle*Math.PI/180,m);
+        guideKey=key;
+      }
+      path(guidePoints);
+    }
+    ctx.stroke();ctx.setLineDash([]);ctx.lineWidth=1;
+    ctx.fillStyle=co.bg;ctx.strokeStyle=co.boundary;circle(2);ctx.fill();ctx.stroke();
+    ctx.strokeStyle=co.plus;ctx.lineWidth=1.6;path(trail);ctx.stroke();
+    const pos=xy(q.x,q.y);
+    ctx.fillStyle=co.plus;ctx.beginPath();ctx.arc(...pos,7,0,TAU);ctx.fill();
+    ctx.lineWidth=1;ctx.fillStyle=co.muted;ctx.textAlign=&#x27;left&#x27;;
+    const radii=m.e===0?&#x27;r = &#x27;+fmt(m.p,2):&#x27;rₚ = &#x27;+fmt(m.rp,2)+&#x27; / rₐ = &#x27;+fmt(m.ra,2);
+    ctx.fillText(radii+&#x27; r_g&#x27;,12,height-12);
+    geometry={...plot,pos,cx,cy,scale,chi:state[0]};
+    plot.canvas.dataset.radius=String(q.r);plot.canvas.dataset.phi=String(state[1]);plot.canvas.dataset.chi=String(state[0]);
+  }
   function drawWaves(){const wave=canvas(&#x27;waveform&#x27;,200),{ctx,box,colors:co,x,start}=wave;const samples=gw.samples.filter(s=&gt;s.t&gt;=start-gw.dt);let peak=0.1;for(const s of samples)peak=Math.max(peak,Math.abs(s.plus),Math.abs(s.cross));const ylim=Math.ceil(peak*1.15*4)/4,y=v=&gt;box.y+box.height*(0.5-v/(2*ylim));axes(wave,-ylim,ylim,&#x27;h / h₀&#x27;);ctx.save();ctx.beginPath();ctx.rect(box.x,box.y,box.width,box.height);ctx.clip();for(const key of [&#x27;plus&#x27;,&#x27;cross&#x27;]){ctx.strokeStyle=co[key];ctx.setLineDash(key===&#x27;cross&#x27;?[5,3]:[]);ctx.beginPath();samples.forEach((s,i)=&gt;{i?ctx.lineTo(x(s.t),y(s[key])):ctx.moveTo(x(s.t),y(s[key]));});ctx.stroke();}ctx.restore();wave.canvas.dataset.samples=String(samples.length);
     const period=m.valid?m.period:1,end=Math.max(8*period,time),bounds={start:end-8*period,end};
     fourier.render({samples:gw.samples,bounds,tunit:m.tunit,colors:co,running,frequencyUnit:&#x27;mHz&#x27;,timeUnit:&#x27;h&#x27;});
@@ -5240,11 +5385,38 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   role(&#x27;preset&#x27;).addEventListener(&#x27;change&#x27;,()=&gt;applyPreset(role(&#x27;preset&#x27;).value));
   window.orbitalToy.openGeodesicPreset=key=&gt;applyPreset(key,true);
   $(&#x27;[data-action=&quot;play&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{if(!m.valid)return;running=!running;last=performance.now();draw();});$(&#x27;[data-action=&quot;reset&quot;]&#x27;).addEventListener(&#x27;click&#x27;,reset);$(&#x27;[data-action=&quot;step&quot;]&#x27;).addEventListener(&#x27;click&#x27;,()=&gt;{advance(m.period/100);draw();});
-  const orbit=role(&#x27;orbit&#x27;);function pointer(e){const b=orbit.getBoundingClientRect();return [e.clientX-b.left,e.clientY-b.top];}
-  orbit.addEventListener(&#x27;pointerdown&#x27;,e=&gt;{if(!geometry||Math.hypot(...pointer(e).map((v,i)=&gt;v-geometry.pos[i]))&gt;24)return;e.preventDefault();running=false;p.chi=((state[0]*180/Math.PI)%360+360)%360;p.angle=((state[1]*180/Math.PI)%360+360)%360;drag={cx:geometry.cx,cy:geometry.cy,scale:geometry.scale};orbit.setPointerCapture(e.pointerId);status();});
-  orbit.addEventListener(&#x27;pointermove&#x27;,e=&gt;{if(!drag)return;e.preventDefault();const [px,py]=pointer(e),x=(px-drag.cx)/drag.scale,y=(drag.cy-py)/drag.scale;p.p=clamp(Math.hypot(x,y)*(1+p.e*Math.cos(p.chi*Math.PI/180)),...limits.p);p.angle=(Math.atan2(y,x)*180/Math.PI+360)%360;role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();});
-  function end(e){if(!drag)return;drag=null;if(orbit.hasPointerCapture(e.pointerId))orbit.releasePointerCapture(e.pointerId);persist();}orbit.addEventListener(&#x27;pointerup&#x27;,end);orbit.addEventListener(&#x27;pointercancel&#x27;,end);
+  const orbit=role(&#x27;orbit&#x27;);
+  orbit.addEventListener(&#x27;pointerdown&#x27;,e=&gt;{
+    if(drag||!geometry||e.button!==0)return;
+    const box=orbit.getBoundingClientRect(),sx=geometry.width/box.width,sy=geometry.height/box.height;
+    const dx=e.clientX-box.left-geometry.pos[0]/sx,dy=e.clientY-box.top-geometry.pos[1]/sy;
+    if(Math.hypot(dx,dy)&gt;24)return;
+    e.preventDefault();
+    drag={id:e.pointerId,originX:e.clientX,originY:e.clientY,sx,sy,geometry,moved:false};
+    orbit.setPointerCapture(e.pointerId);
+  });
+  orbit.addEventListener(&#x27;pointermove&#x27;,e=&gt;{
+    if(!drag||e.pointerId!==drag.id)return;
+    const dx=e.clientX-drag.originX,dy=e.clientY-drag.originY;
+    if(!drag.moved&amp;&amp;Math.hypot(dx,dy)&lt;4)return;
+    e.preventDefault();
+    const {pos,cx,cy,scale,chi}=drag.geometry;
+    const x=(pos[0]+dx*drag.sx-cx)/scale,y=(cy-pos[1]-dy*drag.sy)/scale;
+    drag.moved=true;
+    p.chi=((chi*180/Math.PI)%360+360)%360;
+    p.p=clamp(Math.hypot(x,y)*(1+p.e*Math.cos(chi)),...limits.p);
+    p.angle=(Math.atan2(y,x)*180/Math.PI+360)%360;
+    role(&#x27;preset&#x27;).value=&#x27;custom&#x27;;reset();
+  });
+  function end(e){
+    if(!drag||e.pointerId!==drag.id)return;
+    const moved=drag.moved;drag=null;
+    if(orbit.hasPointerCapture(e.pointerId))orbit.releasePointerCapture(e.pointerId);
+    if(moved)persist();
+  }
+  orbit.addEventListener(&#x27;pointerup&#x27;,end);orbit.addEventListener(&#x27;pointercancel&#x27;,end);orbit.addEventListener(&#x27;lostpointercapture&#x27;,end);
   const observer=new ResizeObserver(()=&gt;{dirty=true;draw();});observer.observe(root);function onTheme(){colorCache=null;dirty=true;draw();}const theme=new MutationObserver(onTheme);theme.observe(document.documentElement,{attributes:true,attributeFilter:[&#x27;class&#x27;,&#x27;style&#x27;,&#x27;data-theme&#x27;]});theme.observe(document.body,{attributes:true,attributeFilter:[&#x27;class&#x27;,&#x27;style&#x27;,&#x27;data-theme&#x27;]});const appearance=matchMedia(&#x27;(prefers-color-scheme: dark)&#x27;);appearance.addEventListener(&#x27;change&#x27;,onTheme);
+  document.addEventListener(&#x27;DOMContentLoaded&#x27;,onTheme,{once:true});
   document.addEventListener(&#x27;orbital-language&#x27;,()=&gt;{sync();dirty=true;if(root.hidden)status();else draw();});
   document.addEventListener(&#x27;orbital-mode&#x27;,()=&gt;{running=false;last=performance.now();dirty=true;draw();});window.addEventListener(&#x27;openai:set_globals&#x27;,e=&gt;{const saved=e.detail?.globals?.widgetState?.modelContent?.geodesicParameters;if(!saved)return;const next=clean(saved);if(Object.keys(defaults).every(k=&gt;p[k]===next[k]))return;p=next;reset();});
   function frame(now){if(!root.isConnected){observer.disconnect();theme.disconnect();appearance.removeEventListener(&#x27;change&#x27;,onTheme);return;}const dt=clamp((now-last)/1000,0,0.05);last=now;if(!root.hidden&amp;&amp;!document.hidden){if(running)advance(dt*p.speed*m.period);if(dirty&amp;&amp;now-lastDraw&gt;50)draw();}requestAnimationFrame(frame);}
@@ -5293,6 +5465,9 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   --orbit-action: light-dark(#425d73, #b2cadc);
   --orbit-action-text: light-dark(#ffffff, #18242e);
   --orbit-secondary: light-dark(#64717e, #a8b3bf);
+  --orbit-guide-a: color-mix(in srgb, var(--viz-series-1) 70%, var(--foreground));
+  --orbit-guide-b: color-mix(in srgb, var(--viz-series-2) 70%, var(--foreground));
+  --orbit-guide-boundary: color-mix(in srgb, var(--orbit-secondary) 65%, var(--orbit-surface));
   --orbit-shadow: 0 3px 14px light-dark(#29384906, #00000014);
 }
 html &gt; body {
@@ -5430,6 +5605,8 @@ html &gt; body {
 .orbit-panel-heading { display: flex; align-items: baseline; justify-content: space-between; flex-wrap: wrap; gap: 4px 12px; margin-bottom: 12px; }
 .orbit-panel-heading h3 { margin: 0; }
 :is(#binary-evolution, #emri-sandbox, #schwarzschild-sandbox) :is(.be-orbit, .em-orbit, .sg-orbit) { border-radius: 8px; }
+.orbit-initial-guide { fill: none; stroke-width: 2; stroke-dasharray: 6 4; }
+.orbit-guide-swatch { display: inline-block; width: 19px; margin-right: 5px; border-top: 2px dashed var(--guide-color, var(--orbit-secondary)); vertical-align: middle; }
 .be-plot-heading { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; justify-content: space-between; margin-bottom: 10px; }
 .be-plot-heading h3 { margin: 0; }
 .be-eccentricity { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--orbit-line); }
