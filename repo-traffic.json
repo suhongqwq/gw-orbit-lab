@@ -1,8 +1,8 @@
 {
   "since": "2026-11-20",
-  "total": 8,
-  "lastObserved": "2026-11-22",
+  "total": 12,
+  "lastObserved": "2026-11-26",
   "coverageComplete": true,
-  "sealedThrough": "2026-11-20",
-  "sealedTotal": 8
+  "sealedThrough": "2026-11-24",
+  "sealedTotal": 11
 }
