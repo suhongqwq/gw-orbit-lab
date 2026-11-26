@@ -164,6 +164,16 @@
   box-sizing: border-box;
 }
 
+/* Keep the floating Page header&#x27;s clearance inside the scrolling document. */
+html[data-visualize-page-header] {
+  padding-block-start: var(--page-header-clearance);
+  scroll-padding-block-start: var(--page-header-clearance);
+}
+
+html[data-visualize-page-inline-inset] &gt; body {
+  padding-inline: var(--page-content-inline-inset);
+}
+
 html &gt; body {
   /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
   --color-background-primary: var(
@@ -401,6 +411,81 @@ pre code {
   border-radius: 0 !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+[data-codex-dashboard-annotation-hover],
+[data-codex-dashboard-annotation-hover] * {
+  cursor: var(--codex-dashboard-review-cursor, crosshair) !important;
+}
+
+@supports not (top: anchor(top)) {
+  [data-codex-dashboard-annotation-hover] {
+    outline: 2px dashed var(--blue) !important;
+    outline-offset: -2px;
+  }
+}
+
+[data-codex-dashboard-review-overlay]:popover-open,
+[data-codex-dashboard-note-marker] {
+  all: initial;
+}
+
+[data-dashboard-inspection=&quot;available&quot;]:not(:focus-visible) {
+  outline: none;
+}
+
+[data-dashboard-inspection=&quot;current&quot;],
+[data-codex-dashboard-review-overlay]:popover-open {
+  outline: 2px solid var(--blue);
+  outline-offset: min(
+    3px,
+    calc(var(--dashboard-gap, 16px) / 4),
+    calc(var(--visualize-paint-gutter, 5px) - 2px)
+  );
+}
+
+[data-codex-dashboard-review-overlay]:popover-open {
+  position: fixed;
+  position-anchor: auto;
+  left: anchor(left);
+  top: anchor(top);
+  width: anchor-size(width);
+  height: anchor-size(height);
+  position-visibility: anchors-visible;
+  pointer-events: none;
+  /* Annotation targets range from individual table cells to whole blocks. */
+  border-radius: min(var(--radius-2xl), 20%);
+  outline-style: dashed;
+}
+
+[data-codex-dashboard-note-marker] {
+  position: absolute;
+  left: 100%;
+  top: 0;
+  transform: translate(-50%, -50%);
+  width: 26px;
+  height: 26px;
+  border-radius: 50% 50% 50% 3px;
+  background: var(--color-background-info-solid, var(--blue));
+  box-shadow:
+    0 0 0 1px white,
+    0 4px 8px -2px rgb(0 0 0 / 16%);
+}
+
+[data-codex-dashboard-note-marker]:enabled {
+  cursor: pointer;
+  pointer-events: auto;
+}
+
+[data-codex-dashboard-note-marker]:enabled:is(:hover, :focus-visible) {
+  scale: 1.08;
+  transform-origin: bottom left;
+}
+
+[data-dashboard-direct-editing]
+  &gt; :is(experimental-dash-block, dash-block)::part(header) {
+  touch-action: auto;
+  user-select: auto;
 }
 
 .tooltip {
@@ -1520,6 +1605,25 @@ svg.lucide {
 .text-warning,
 .text-destructive {
   color: var(--destructive);
+}
+
+html:where([data-visualize-live]) &gt; body {
+  line-height: var(--font-line-height-base);
+}
+
+:where(html[data-visualize-live]) table,
+:where(html[data-visualize-live]) .table {
+  font: inherit;
+}
+
+:where(html[data-visualize-live]) small,
+:where(html[data-visualize-live]) .text-small {
+  font-size: inherit;
+  line-height: inherit;
+}
+
+:where(html[data-visualize-live]) .table thead :is(th, td) {
+  line-height: inherit;
 }
 
 html&gt;body{padding:0}&lt;/style&gt;
@@ -4774,7 +4878,7 @@ window.OrbitSite = {&quot;titles&quot;: {&quot;zh-CN&quot;: &quot;引力波轨�
   const clamp=(v,a,b)=&gt;Math.min(b,Math.max(a,v));
   const defaults={centralMass:1e6,massA:10,massB:30,rA:55,rB:95,vtA:0.82,vtB:0.9,vrA:0,vrB:0,phaseA:0,phaseB:130,pn:true,radiation:true,strength:1e5,speed:0.8,zoom:1,nearMerger:true};
   const limits={centralMass:[1e4,1e7],massA:[1,1000],massB:[1,1000],rA:[16,400],rB:[16,400],vtA:[-1.5,1.5],vtB:[-1.5,1.5],vrA:[-1.5,1.5],vrB:[-1.5,1.5],phaseA:[0,360],phaseB:[0,360],strength:[1,1e6],speed:[0.05,5],zoom:[0.5,3]};
-  const presets={inspiral:{...defaults},physical:{...defaults,strength:1},precession:{...defaults,radiation:false,vtA:0.78},encounter:{...defaults,centralMass:1e4,massA:30,massB:500,rA:70,rB:90,vtA:0.95,vtB:0.7,phaseB:65,pn:false,radiation:false},newton:{...defaults,pn:false,radiation:false}};
+  const presets={inspiral:{...defaults},physical:{...defaults,strength:1},precession:{...defaults,radiation:false,vtA:0.78},encounter:{...defaults,centralMass:1e4,massA:30,massB:500,rA:60,rB:90,vtA:0.9,vtB:0.98,phaseB:278,pn:false,radiation:false},newton:{...defaults,pn:false,radiation:false}};
   function clean(input){const p={...defaults};for(const [k,[lo,hi]] of Object.entries(limits))if(typeof input?.[k]===&#x27;number&#x27;&amp;&amp;Number.isFinite(input[k]))p[k]=clamp(input[k],lo,hi);for(const k of [&#x27;pn&#x27;,&#x27;radiation&#x27;,&#x27;nearMerger&#x27;])if(typeof input?.[k]===&#x27;boolean&#x27;)p[k]=input[k];return p;}
   // Units: r_g = GM/c², t_g = GM/c³ and central mass M. Thus G=M=c=1.
   function makeModel(p){const masses=[1,p.massA/p.centralMass,p.massB/p.centralMass];return {masses,tunit:GM_SUN*p.centralMass/C**3,length:GM_SUN*p.centralMass/C**2,period:TAU*Math.min(Math.sqrt(p.rA**3/(1+masses[1])),Math.sqrt(p.rB**3/(1+masses[2]))),referenceR:p.rA,pn:p.pn,rr:p.radiation?p.strength:0,stopRadius:p.nearMerger?6:15,stopSpeed:p.nearMerger?0.6:0.4};}
@@ -5153,7 +5257,7 @@ window.orbitalToy?.show(window.orbitalToy.mode);
         &lt;span class=&quot;text-muted&quot;&gt;视界投影 r = 2 r_g&lt;/span&gt;
       &lt;/div&gt;
       &lt;div class=&quot;sg-readouts&quot;&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;坐标时间 t (h)&lt;/span&gt;&lt;output data-value=&quot;time&quot;&gt;0.0000&lt;/output&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;固有时间 τ (h)&lt;/span&gt;&lt;output data-value=&quot;proper&quot;&gt;0.0000&lt;/output&gt;&lt;/span&gt;&lt;span&gt;&lt;span class=&quot;text-small text-muted&quot;&gt;半径 r / r_g&lt;/span&gt;&lt;output data-value=&quot;radius&quot;&gt;—&lt;/output&gt;&lt;/span&gt;&lt;/div&gt;
-      &lt;div class=&quot;sg-status text-small&quot; data-role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
+      &lt;div id=&quot;sg-orbit-status&quot; class=&quot;sg-status text-small&quot; data-role=&quot;status&quot; aria-live=&quot;polite&quot;&gt;&lt;/div&gt;
       &lt;div class=&quot;sg-diagnostics text-small tabular-nums&quot;&gt;&lt;span data-value=&quot;precession&quot;&gt;&lt;/span&gt;&lt;span data-value=&quot;frequencies&quot;&gt;&lt;/span&gt;&lt;/div&gt;
     &lt;/section&gt;
     &lt;section aria-label=&quot;测地线的近似四极矩波形&quot;&gt;
@@ -5300,6 +5404,7 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   function sync(){
     role(&#x27;emri-preset-note&#x27;).hidden=role(&#x27;preset&#x27;).value!==&#x27;emri&#x27;;
     role(&#x27;orbit-legend&#x27;).hidden=!m.valid;
+    role(&#x27;orbit&#x27;).setAttribute(&#x27;aria-describedby&#x27;,m.valid?&#x27;sg-orbit-legend&#x27;:&#x27;sg-orbit-status&#x27;);
     role(&#x27;reference-label&#x27;).textContent=p.e===0?t(&#x27;初始圆轨道&#x27;,&#x27;Initial circular orbit&#x27;):
       t(&#x27;初始测地线 · 1 个径向周期&#x27;,&#x27;Initial geodesic · one radial period&#x27;);
     for(const el of root.querySelectorAll(&#x27;[data-key]&#x27;)){
@@ -5330,7 +5435,15 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   function drawOrbit(){
     const plot=canvas(&#x27;orbit&#x27;,root.getBoundingClientRect().width&gt;=760?440:340),{ctx,width,height,colors:co}=plot;
     ctx.strokeStyle=co.border;ctx.strokeRect(0.5,0.5,width-1,height-1);
-    if(!m.valid){geometry=null;return;}
+    if(!m.valid){
+      geometry=null;
+      for(const key of [&#x27;radius&#x27;,&#x27;phi&#x27;,&#x27;chi&#x27;])delete plot.canvas.dataset[key];
+      ctx.textAlign=&#x27;center&#x27;;ctx.fillStyle=co.fg;
+      ctx.fillText(t(&#x27;当前参数无稳定束缚轨道&#x27;,&#x27;No stable bound orbit for these parameters&#x27;),width/2,height/2-6,width-32);
+      ctx.fillStyle=co.muted;
+      ctx.fillText(t(&#x27;增大 p 或减小 e，使 p &gt; 6 + 2e&#x27;,&#x27;Increase p or lower e so p &gt; 6 + 2e&#x27;),width/2,height/2+17,width-32);
+      return;
+    }
     ctx.fillStyle=co.muted;ctx.textAlign=&#x27;left&#x27;;ctx.fillText(t(&#x27;拖动小天体&#x27;,&#x27;Drag the small body&#x27;),12,22);
     const q=GR.point(state,m),scale=Math.min(width-40,height-60)/(2*m.ra*1.08),cx=width/2,cy=height/2+8;
     const xy=(x,y)=&gt;[cx+x*scale,cy-y*scale];
@@ -5465,8 +5578,8 @@ window.orbitalToy?.show(window.orbitalToy.mode);
   --orbit-action: light-dark(#425d73, #b2cadc);
   --orbit-action-text: light-dark(#ffffff, #18242e);
   --orbit-secondary: light-dark(#64717e, #a8b3bf);
-  --orbit-guide-a: color-mix(in srgb, var(--viz-series-1) 70%, var(--foreground));
-  --orbit-guide-b: color-mix(in srgb, var(--viz-series-2) 70%, var(--foreground));
+  --orbit-guide-a: color-mix(in srgb, var(--viz-series-1) 46%, transparent);
+  --orbit-guide-b: color-mix(in srgb, var(--viz-series-2) 46%, transparent);
   --orbit-guide-boundary: color-mix(in srgb, var(--orbit-secondary) 65%, var(--orbit-surface));
   --orbit-shadow: 0 3px 14px light-dark(#29384906, #00000014);
 }
